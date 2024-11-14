@@ -33,9 +33,9 @@ fn main() -> Result<(), io::Error> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut current_dir = PathBuf::from(".");
+    // Start in the current directory
+    let mut current_dir = PathBuf::from("."); // or use env::current_dir()?;
     let original_dir = current_dir.clone();
-    // let mut current_dir = env::current_dir()?;
 
     let mut list_state = ListState::default();
     list_state.select(Some(0)); // Initialize selection at the first item
@@ -43,6 +43,7 @@ fn main() -> Result<(), io::Error> {
     let mut is_viewing_file = false;
     let mut file_content: Vec<String> = Vec::new();
     let mut file_scroll = 0;
+    let mut file_path = String::new(); // Track file path for viewer title
 
     loop {
         if !is_viewing_file {
@@ -66,28 +67,23 @@ fn main() -> Result<(), io::Error> {
                 let size = f.size();
                 let layout = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(3), Constraint::Percentage(100)].as_ref())
+                    .constraints([Constraint::Percentage(100)].as_ref())
                     .split(size);
 
-                // Display current directory path
-                let path_display = Paragraph::new(Spans::from(vec![
-                    Span::styled(
-                        format!("Current Directory: {:?}", current_dir.display()),
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                    ),
-                ]))
-                .block(Block::default().borders(Borders::ALL).title("Path"));
-
-                // Display directory list
-                let list_block = Block::default().borders(Borders::ALL).title("Directory Browser");
+                // Display directory list with current path as title, colored blue
+                let list_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        format!("Directory Browser - {}", current_dir.display()),
+                        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                    ));
                 let list = List::new(items)
                     .block(list_block)
                     .highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD))
                     .highlight_symbol(">> ");
 
-                // Render widgets
-                f.render_widget(path_display, layout[0]);
-                f.render_stateful_widget(list, layout[1], &mut list_state);
+                // Render the directory list
+                f.render_stateful_widget(list, layout[0], &mut list_state);
             })?;
 
             // Handle user input for directory browsing
@@ -128,13 +124,14 @@ fn main() -> Result<(), io::Error> {
                                 list_state.select(Some(0));
                             } else if path.is_file() {
                                 file_content = read_file_lines(&path)?;
+                                file_path = path.display().to_string(); // Set file path title
                                 is_viewing_file = true;
                                 file_scroll = 0;
                             }
                         }
                     }
-                    KeyCode::Esc  => {
-                        if current_dir==original_dir {
+                    KeyCode::Esc => {
+                        if current_dir == original_dir {
                             continue;
                         }
                         if let Some(parent) = current_dir.parent() {
@@ -149,12 +146,18 @@ fn main() -> Result<(), io::Error> {
             // File viewing mode
             terminal.draw(|f| {
                 let size = f.size();
-                let block = Block::default().borders(Borders::ALL).title("File Viewer");
                 let layout = Layout::default()
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Percentage(100)].as_ref())
                     .split(size);
 
+                // Show the file content with file path as title, colored blue
+                let file_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        format!("File Viewer - {}", file_path),
+                        Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+                    ));
                 let content: Vec<Spans> = file_content
                     .iter()
                     .skip(file_scroll)
@@ -163,7 +166,7 @@ fn main() -> Result<(), io::Error> {
                     .collect();
                 
                 let paragraph = Paragraph::new(content)
-                    .block(block);
+                    .block(file_block);
 
                 f.render_widget(paragraph, layout[0]);
             })?;
@@ -200,4 +203,4 @@ fn read_file_lines(path: &PathBuf) -> io::Result<Vec<String>> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
     Ok(reader.lines().filter_map(Result::ok).collect())
-}
+} 
