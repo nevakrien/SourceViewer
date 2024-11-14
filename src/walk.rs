@@ -35,6 +35,8 @@ pub struct State {
     pub file_content: Vec<String>,
     pub file_scroll: usize,
     pub file_path: String,
+
+    pub show_lines: bool
 }
 
 impl State {
@@ -47,6 +49,8 @@ impl State {
             file_content: Vec::new(),
             file_scroll: 0,
             file_path: String::new(),
+
+            show_lines: false,
         }
     }
 }
@@ -160,12 +164,20 @@ pub fn render_file_viewer(
                 format!("File Viewer - {}", state.file_path),
                 Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
             ));
+
         let content: Vec<Spans> = state
             .file_content
             .iter()
             .skip(state.file_scroll)
             .take(size.height as usize - 2)
-            .map(|line| Spans::from(Span::raw(line.clone())))
+            .enumerate()
+            .map(|(i, line)| {
+                if state.show_lines {
+                    create_line_with_number(i + state.file_scroll, line)
+                } else {
+                    create_line_without_number(line)
+                }
+            })
             .collect();
 
         let paragraph = Paragraph::new(content).block(file_block);
@@ -173,6 +185,24 @@ pub fn render_file_viewer(
     })?;
     Ok(())
 }
+
+// Helper function to create a line with a line number
+fn create_line_with_number(line_number: usize, line: &str) -> Spans {
+    let line_number_span = Span::styled(
+        format!("{:<4} ", line_number + 1),
+        Style::default().fg(Color::Blue),
+    );
+    let line_content_span = Span::raw(line.to_string());
+    Spans::from(vec![line_number_span, line_content_span])
+}
+
+// Helper function to create a line without a line number
+fn create_line_without_number(line: &str) -> Spans {
+    Spans::from(Span::raw(line.to_string()))
+}
+
+
+
 
 pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
@@ -188,6 +218,9 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
                     state.file_scroll += 1;
                 }
             }
+
+            KeyCode::Char('l') => state.show_lines = !state.show_lines, 
+
             KeyCode::Esc => state.mode = Mode::Dir,
             _ => {}
         }
