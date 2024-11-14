@@ -26,6 +26,15 @@ pub enum Section<'a> {
     Info(InfoSection<'a>),
 }
 
+impl Section<'_> {
+    pub fn name(&self) -> &str {
+        match self {
+            Section::Code(x) => &x.name,
+            Section::Info(x) => &x.name,
+        }
+    }
+}
+
 #[derive(Clone,Debug,PartialEq)]
 pub struct CodeSection{
     pub name: Box<str>,
