@@ -1,4 +1,5 @@
 // use goblin::elf::header;
+use goblin::pe;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use goblin::mach;
@@ -134,6 +135,7 @@ impl<'a> ParsedExecutable<'a> {
         match &obj {
             Object::Elf(elf) => {Self::parse_elf(elf,buffer)},
             Object::Mach(mach) => {Self::parse_mach(mach,buffer)},
+            Object::PE(pe) => Self::parse_pe(pe, buffer),
             _ => Err("Unsupported file format".into()),
         }
     }
@@ -242,7 +244,55 @@ impl<'a> ParsedExecutable<'a> {
             Err("Unsupported Mach-O format".into())
         }
     }
+    // Function to parse PE files
+    pub fn parse_pe(pe: &pe::PE, buffer: &'a [u8]) -> Result<ParsedExecutable<'a>, Box<dyn Error>> {
+        // Windows PE format endianness is typically little-endian
+        let endian = RunTimeEndian::Little;
 
+        // Initialize Capstone for PE architecture
+        let cs = create_capstone_pe(pe)?;
+        let mut parsed_sections = Vec::new();
+        let mut dw = DwarfSectionLoader::new(endian);
+
+        // Iterate over PE sections
+        for section in &pe.sections {
+            let section_name = section.name().unwrap_or("unknown").to_string().into_boxed_str();
+            let section_data = &buffer[section.pointer_to_raw_data as usize..(section.pointer_to_raw_data as usize + section.size_of_raw_data as usize)];
+
+            if section.characteristics & pe::section_table::IMAGE_SCN_MEM_EXECUTE != 0 {
+                // Disassemble executable sections
+                let disasm = cs.disasm_all(section_data, section.virtual_address as u64)?;
+                let mut instructions = Vec::new();
+                for insn in disasm.iter() {
+                    instructions.push(InstructionDetail {
+                        address: insn.address(),
+                        mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
+                        op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
+                    });
+                }
+
+                parsed_sections.push(Section::Code(CodeSection {
+                    name: section_name,
+                    instructions,
+                }));
+            } else {
+                dw.maybe_add_section(&section_name, section_data)?;
+
+                // Collect non-executable sections
+                parsed_sections.push(Section::NonExecutable(NonExecutableSection {
+                    name: section_name,
+                    data: section_data,
+                }));
+            }
+        }
+
+        let dwarf = dw.load_dwarf()?;
+
+        Ok(ParsedExecutable {
+            sections: parsed_sections,
+            dwarf,
+        })
+    }
 }
 
 
@@ -293,6 +343,26 @@ fn create_capstone_mach(mach: &Mach<'_>) -> Result<Capstone, Box<dyn Error>> {
             }
         }
         _ => return Err("Unsupported Mach-O format".into()),
+    };
+    Ok(cs)
+}
+
+// Create Capstone configuration for PE files
+fn create_capstone_pe(pe: &pe::PE) -> Result<Capstone, Box<dyn Error>> {
+    let cs = match pe.header.coff_header.machine {
+        pe::header::COFF_MACHINE_X86_64 => {
+            Capstone::new().x86().mode(x86::ArchMode::Mode64).build()?
+        }
+        pe::header::COFF_MACHINE_X86 => {  // Updated from COFF_MACHINE_I386
+            Capstone::new().x86().mode(x86::ArchMode::Mode32).build()?
+        }
+        pe::header::COFF_MACHINE_ARM => {
+            Capstone::new().arm().mode(arm::ArchMode::Arm).build()?
+        }
+        pe::header::COFF_MACHINE_ARM64 => {
+            Capstone::new().arm64().mode(arm64::ArchMode::Arm).build()?
+        }
+        _ => return Err("Unsupported architecture".into()),
     };
     Ok(cs)
 }
