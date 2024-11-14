@@ -1,7 +1,7 @@
 use clap::{Arg, Command};
 use std::path::PathBuf;
 use std::error::Error;
-use source_viewer::subcommands::{lines_command,sections_commands};
+use source_viewer::subcommands::*;
 
 
 
@@ -31,6 +31,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .num_args(1..) // Allows multiple file paths
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
+        )
+
+        .subcommand(
+            Command::new("source_view")
+                .about("looks at the source code files")
+                .arg(
+                    Arg::new("FILES")
+                        .help("Input binary/object files to process")
+                        .required(true)
+                        .num_args(1..) // Allows multiple file paths
+                        .value_parser(clap::value_parser!(PathBuf)),
+                ),
         );
         
 
@@ -39,6 +51,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     match matches.subcommand() {
         Some(("lines", sub_m)) => lines_command(sub_m),
         Some(("sections", sub_m)) => sections_commands(sub_m),
+        Some(("source_view", sub_m)) => source_view_command(sub_m),
         _ => {
             command.print_help()?;
             std::process::exit(1);
