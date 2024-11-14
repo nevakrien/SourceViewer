@@ -1,4 +1,6 @@
 // use goblin::elf::header;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use goblin::mach;
 use goblin::mach::Mach;
 use goblin::elf;
@@ -43,6 +45,87 @@ impl fmt::Display for InstructionDetail {
     }
 }
 
+// Define a struct to hold DWARF section data
+struct DwarfSectionLoader<'a> {
+    sections: HashMap<SectionId, &'a [u8]>,
+    endian: RunTimeEndian,
+}
+
+#[derive(Debug)]
+struct DuplicateEntry;
+
+impl fmt::Display for DuplicateEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Duplicate entry detected")
+    }
+}
+
+impl std::error::Error for DuplicateEntry {}
+
+impl<'a> DwarfSectionLoader<'a> {
+    fn new(endian: RunTimeEndian) -> Self {
+        Self {
+            sections: HashMap::new(),
+            endian,
+        }
+    }
+
+    
+
+    // Method to add a section if it matches one of the DWARF sections
+    fn maybe_add_section(&mut self, section_name: &str, data: &'a [u8]) -> Result<(),DuplicateEntry>{
+        let section_id = match section_name {
+            ".debug_line" => Some(SectionId::DebugLine),
+            ".debug_info" => Some(SectionId::DebugInfo),
+            ".debug_abbrev" => Some(SectionId::DebugAbbrev),
+            ".debug_str" => Some(SectionId::DebugStr),
+            ".debug_ranges" => Some(SectionId::DebugRanges),
+            ".debug_rnglists" => Some(SectionId::DebugRngLists),
+            ".debug_addr" => Some(SectionId::DebugAddr),
+            ".debug_aranges" => Some(SectionId::DebugAranges),
+            ".debug_loc" => Some(SectionId::DebugLoc),
+            ".debug_loclists" => Some(SectionId::DebugLocLists),
+            ".debug_line_str" => Some(SectionId::DebugLineStr),
+            ".debug_str_offsets" => Some(SectionId::DebugStrOffsets),
+            ".debug_types" => Some(SectionId::DebugTypes),
+            ".debug_macinfo" => Some(SectionId::DebugMacinfo),
+            ".debug_macro" => Some(SectionId::DebugMacro),
+            ".debug_pubnames" => Some(SectionId::DebugPubNames),
+            ".debug_pubtypes" => Some(SectionId::DebugPubTypes),
+            ".debug_cu_index" => Some(SectionId::DebugCuIndex),
+            ".debug_tu_index" => Some(SectionId::DebugTuIndex),
+            ".debug_frame" => Some(SectionId::DebugFrame),
+            ".eh_frame" => Some(SectionId::EhFrame),
+            ".eh_frame_hdr" => Some(SectionId::EhFrameHdr),
+            _ => None,
+        };
+
+        if let Some(id) = section_id {
+            match self.sections.entry(id) {
+                Entry::Vacant(entry) => {
+                    entry.insert(data);
+                    Ok(())
+                }
+                Entry::Occupied(_) => Err(DuplicateEntry),
+            }
+        } else {
+            Ok(())
+        }
+    }
+
+    // Method to retrieve a section's data by its DWARF SectionId
+    fn get_section(&self, section: SectionId) -> &'a [u8] {
+        self.sections.get(&section).map(|x| *x).unwrap_or(&[])
+    }
+
+    // Method to load DWARF data using the stored sections
+    fn load_dwarf(&self) -> Result<Dwarf<EndianSlice<'a,RunTimeEndian>>, gimli::Error> {
+        Dwarf::load(|section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
+            Ok(EndianSlice::new(self.get_section(section), self.endian))
+        })
+    }
+}
+
 impl<'a> ParsedExecutable<'a> {
     pub fn parse(buffer: &'a[u8]) -> Result<ParsedExecutable, Box<dyn Error>> {
         // Parse goblin object
@@ -56,9 +139,13 @@ impl<'a> ParsedExecutable<'a> {
     }
 
     pub fn parse_elf(elf:&elf::Elf,buffer: &'a[u8]) -> Result<ParsedExecutable<'a>, Box<dyn Error>> {
+        // Determine the endianness dynamically
+        let endian = if elf.little_endian { RunTimeEndian::Little } else { RunTimeEndian::Big };
+
         // Create Capstone instance dynamically
         let cs = create_capstone_elf(&elf)?;
         let mut parsed_sections = Vec::new();
+        let mut dw = DwarfSectionLoader::new(endian);
 
         // Process sections in the order they come in the ELF file
         for section in &elf.section_headers {
@@ -82,6 +169,7 @@ impl<'a> ParsedExecutable<'a> {
                     instructions,
                 }));
             } else {
+                dw.maybe_add_section(&section_name,section_data)?;
                 // Collect non-executable sections
                 parsed_sections.push(Section::NonExecutable(NonExecutableSection {
                     name: section_name,
@@ -90,50 +178,7 @@ impl<'a> ParsedExecutable<'a> {
             }
         }
 
-        // Determine the endianness dynamically
-        let endian = if elf.little_endian { RunTimeEndian::Little } else { RunTimeEndian::Big };
-
-        // Function to retrieve a section if present, or return an empty slice if absent.
-        let get_section = |name: &str| {
-            elf.section_headers.iter().find_map(|s| {
-                if let Some(section_name) = elf.shdr_strtab.get_at(s.sh_name) {
-                    if section_name == name {
-                        return Some(&buffer[s.sh_offset as usize..(s.sh_offset + s.sh_size) as usize]);
-                    }
-                }
-                None
-            }).unwrap_or(&[])
-        };
-
-        // Load DWARF sections
-        let dwarf = Dwarf::load(|section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
-            let data = match section {
-                SectionId::DebugLine => get_section(".debug_line"),
-                SectionId::DebugInfo => get_section(".debug_info"),
-                SectionId::DebugAbbrev => get_section(".debug_abbrev"),
-                SectionId::DebugStr => get_section(".debug_str"),
-                SectionId::DebugRanges => get_section(".debug_ranges"),
-                SectionId::DebugRngLists => get_section(".debug_rnglists"),
-                SectionId::DebugAddr => get_section(".debug_addr"),
-                SectionId::DebugAranges => get_section(".debug_aranges"),
-                SectionId::DebugLoc => get_section(".debug_loc"),
-                SectionId::DebugLocLists => get_section(".debug_loclists"),
-                SectionId::DebugLineStr => get_section(".debug_line_str"),
-                SectionId::DebugStrOffsets => get_section(".debug_str_offsets"),
-                SectionId::DebugTypes => get_section(".debug_types"),
-                SectionId::DebugMacinfo => get_section(".debug_macinfo"),
-                SectionId::DebugMacro => get_section(".debug_macro"),
-                SectionId::DebugPubNames => get_section(".debug_pubnames"),
-                SectionId::DebugPubTypes => get_section(".debug_pubtypes"),
-                SectionId::DebugCuIndex => get_section(".debug_cu_index"),
-                SectionId::DebugTuIndex => get_section(".debug_tu_index"),
-                SectionId::DebugFrame => get_section(".debug_frame"),
-                SectionId::EhFrame => get_section(".eh_frame"),
-                SectionId::EhFrameHdr => get_section(".eh_frame_hdr"),
-            };
-
-            Ok(EndianSlice::new(data, endian))
-        })?;
+        let dwarf = dw.load_dwarf()?;
 
         Ok(ParsedExecutable {
             sections: parsed_sections,
@@ -143,8 +188,12 @@ impl<'a> ParsedExecutable<'a> {
     }
 
     pub fn parse_mach(mach: &Mach<'_>, buffer: &'a [u8]) -> Result<ParsedExecutable<'a>, Box<dyn Error>> {
+        // Determine endianness (Mach-O defaults to little-endian on macOS)
+        let endian = RunTimeEndian::Little;
+
         let cs = create_capstone_mach(&mach)?;
         let mut parsed_sections = Vec::new();
+        let mut dw = DwarfSectionLoader::new(endian);
 
         // Iterate over Mach-O segments and sections
         if let Mach::Binary(mach_bin) = mach {
@@ -172,6 +221,8 @@ impl<'a> ParsedExecutable<'a> {
                             instructions,
                         }));
                     } else {
+                        dw.maybe_add_section(&section_name,section_data)?;
+
                         // Collect non-executable sections
                         parsed_sections.push(Section::NonExecutable(NonExecutableSection {
                             name: section_name,
@@ -181,52 +232,7 @@ impl<'a> ParsedExecutable<'a> {
                 }
             }
 
-            // Define a helper closure to retrieve Mach-O section data by name
-            let get_section = |name: &str| {
-                mach_bin.segments.iter().find_map(|segment| {
-                    segment.sections().ok()?.iter().find_map(|(s, _)| {
-                        if let Ok(section_name) = s.name() {
-                            if section_name == name {
-                                return Some(&buffer[s.offset as usize..(s.offset as usize + s.size as usize)]);
-                            }
-                        }
-                        None
-                    })
-                }).unwrap_or(&[])
-            };
-
-            // Determine endianness (Mach-O defaults to little-endian on macOS)
-            let endian = RunTimeEndian::Little;
-
-            // Load DWARF sections
-            let dwarf = Dwarf::load(|section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
-                let data = match section {
-                    SectionId::DebugLine => get_section(".debug_line"),
-                    SectionId::DebugInfo => get_section(".debug_info"),
-                    SectionId::DebugAbbrev => get_section(".debug_abbrev"),
-                    SectionId::DebugStr => get_section(".debug_str"),
-                    SectionId::DebugRanges => get_section(".debug_ranges"),
-                    SectionId::DebugRngLists => get_section(".debug_rnglists"),
-                    SectionId::DebugAddr => get_section(".debug_addr"),
-                    SectionId::DebugAranges => get_section(".debug_aranges"),
-                    SectionId::DebugLoc => get_section(".debug_loc"),
-                    SectionId::DebugLocLists => get_section(".debug_loclists"),
-                    SectionId::DebugLineStr => get_section(".debug_line_str"),
-                    SectionId::DebugStrOffsets => get_section(".debug_str_offsets"),
-                    SectionId::DebugTypes => get_section(".debug_types"),
-                    SectionId::DebugMacinfo => get_section(".debug_macinfo"),
-                    SectionId::DebugMacro => get_section(".debug_macro"),
-                    SectionId::DebugPubNames => get_section(".debug_pubnames"),
-                    SectionId::DebugPubTypes => get_section(".debug_pubtypes"),
-                    SectionId::DebugCuIndex => get_section(".debug_cu_index"),
-                    SectionId::DebugTuIndex => get_section(".debug_tu_index"),
-                    SectionId::DebugFrame => get_section(".debug_frame"),
-                    SectionId::EhFrame => get_section(".eh_frame"),
-                    SectionId::EhFrameHdr => get_section(".eh_frame_hdr"),
-                };
-
-                Ok(EndianSlice::new(data, endian))
-            })?;
+            let dwarf = dw.load_dwarf()?;
 
             Ok(ParsedExecutable {
                 sections: parsed_sections,
@@ -318,6 +324,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     println!("DWARF info loaded successfully");
+    println!("{:?}", parsed_executable.dwarf);
 
     Ok(())
 }
