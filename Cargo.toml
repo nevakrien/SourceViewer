@@ -3,6 +3,10 @@ name = "source_viewer"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "SourceViewer"
+path = "src/main.rs"
+
 [dependencies]
 addr2line = "0.24.2"
 capstone = "0.12.0"
