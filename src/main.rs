@@ -296,6 +296,7 @@ impl<'a> ParsedExecutable<'a> {
 }
 
 
+// Updated create_capstone_elf function to handle additional ELF architectures
 fn create_capstone_elf(elf: &elf::Elf) -> Result<Capstone, Box<dyn Error>> {
     let cs = match elf.header.e_machine {
         elf::header::EM_X86_64 => {
@@ -316,13 +317,25 @@ fn create_capstone_elf(elf: &elf::Elf) -> Result<Capstone, Box<dyn Error>> {
         elf::header::EM_MIPS => {
             Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).build()?
         }
+        elf::header::EM_PPC => {
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+        }
+        elf::header::EM_PPC64 => {
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).build()?
+        }
+        elf::header::EM_SPARC => {
+            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::Default).build()?
+        }
+        elf::header::EM_SPARCV9 => {
+            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::V9).build()?
+        }
         // Add more architectures as needed
         _ => return Err("Unsupported architecture".into()),
     };
     Ok(cs)
 }
 
-// Update create_capstone_mach function to match Mach-O CPU types
+// Updated create_capstone_mach function to match Mach-O CPU types, adding PowerPC
 fn create_capstone_mach(mach: &Mach<'_>) -> Result<Capstone, Box<dyn Error>> {
     let cs = match mach {
         Mach::Binary(mach_bin) => {
@@ -339,6 +352,12 @@ fn create_capstone_mach(mach: &Mach<'_>) -> Result<Capstone, Box<dyn Error>> {
                 goblin::mach::constants::cputype::CPU_TYPE_ARM64 => {
                     Capstone::new().arm64().mode(arm64::ArchMode::Arm).build()?
                 }
+                goblin::mach::constants::cputype::CPU_TYPE_POWERPC => {
+                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+                }
+                goblin::mach::constants::cputype::CPU_TYPE_POWERPC64 => {
+                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).build()?
+                }
                 _ => return Err("Unsupported architecture".into()),
             }
         }
@@ -347,13 +366,13 @@ fn create_capstone_mach(mach: &Mach<'_>) -> Result<Capstone, Box<dyn Error>> {
     Ok(cs)
 }
 
-// Create Capstone configuration for PE files
+// Updated create_capstone_pe function to include additional PE architectures like MIPS and PowerPC
 fn create_capstone_pe(pe: &pe::PE) -> Result<Capstone, Box<dyn Error>> {
     let cs = match pe.header.coff_header.machine {
         pe::header::COFF_MACHINE_X86_64 => {
             Capstone::new().x86().mode(x86::ArchMode::Mode64).build()?
         }
-        pe::header::COFF_MACHINE_X86 => {  // Updated from COFF_MACHINE_I386
+        pe::header::COFF_MACHINE_X86 => {
             Capstone::new().x86().mode(x86::ArchMode::Mode32).build()?
         }
         pe::header::COFF_MACHINE_ARM => {
@@ -362,6 +381,19 @@ fn create_capstone_pe(pe: &pe::PE) -> Result<Capstone, Box<dyn Error>> {
         pe::header::COFF_MACHINE_ARM64 => {
             Capstone::new().arm64().mode(arm64::ArchMode::Arm).build()?
         }
+        pe::header::COFF_MACHINE_MIPSFPU => {
+            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).build()?
+        }
+        pe::header::COFF_MACHINE_MIPSFPU16 => {
+            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips32).build()?
+        }
+        pe::header::COFF_MACHINE_POWERPC => {
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+        }
+        pe::header::COFF_MACHINE_POWERPCFP => {
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+        }
+
         _ => return Err("Unsupported architecture".into()),
     };
     Ok(cs)
