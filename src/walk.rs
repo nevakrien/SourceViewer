@@ -210,9 +210,9 @@ pub fn render_file_viewer(
             .take(max_visible_lines)
             .map(|line| {
                 if state.show_lines {
-                    ListItem::new(vec![create_line_with_number(line)])
+                    ListItem::new(vec![create_line_with_number(line,state.cursor)])
                 } else {
-                    ListItem::new(vec![create_line_without_number(line)])
+                    ListItem::new(vec![create_line_without_number(line,state.cursor)])
                 }
             })
             .collect();
@@ -231,11 +231,23 @@ pub fn render_file_viewer(
 
 
 // Helper function to create a line with a line number and styling
-fn create_line_with_number(line: &Line) -> Spans {
+fn create_line_with_number(line: &Line,_cursor_pos:usize) -> Spans {
     let line_number_span = Span::styled(
-        format!("{:<4} ", line.line_number),
+        format!("{:<4}", line.line_number),
         Style::default().fg(Color::Blue),
     );
+
+    // let c = if cursor_pos+ 1 == line.line_number{
+    //         ">>"
+    //     } else {
+    //         "  "
+    //     };
+
+    // let cursor_span = Span::styled(
+        
+    //     format!("{} ", c),
+    //     Style::default().fg(Color::White),
+    // );
 
     let line_style = if line.is_selected {
         Style::default().fg(Color::Red)
@@ -248,7 +260,7 @@ fn create_line_with_number(line: &Line) -> Spans {
 }
 
 // Helper function to create a line without a line number and styling
-fn create_line_without_number(line: &Line) -> Spans {
+fn create_line_without_number(line: &Line,_cursor:usize) -> Spans {
     let line_style = if line.is_selected {
         Style::default().fg(Color::Red)
     } else {
