@@ -1,8 +1,10 @@
+// use crate::program_context::AsmRegistry;
+use crate::file_parser::MachineFile;
+use std::fs;
 use std::collections::HashSet;
-use crate::program_context::FileLineMapping;
+use crate::program_context::AddressFileMapping;
 use colored::*;
-use typed_arena::Arena;
-use crate::program_context::AsmRegistry;
+// use typed_arena::Arena;
 use crate::file_parser::{Section};
 use std::path::PathBuf;
 use std::error::Error;
@@ -12,21 +14,18 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `lines` command
     let file_paths: Vec<PathBuf> = matches
         .get_many::<PathBuf>("FILES")
-        .expect("FILES argument is required")
+        .expect("FILES argument is required") 
         .cloned()
         .collect();
 
-    // Create a new arena and registry to manage the files
-    let arena = Arena::new();
-    let mut registry = AsmRegistry::new(&arena);
 
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
-        registry.add_file(file_path.clone())?;
-        let machine_file = registry.map.get(&file_path).ok_or("File not found in registry")?;
+        let buffer = fs::read(file_path)?;
+        let machine_file = MachineFile::parse(&buffer)?;
         
-        let source_map = map_instructions_to_source(machine_file)?;
+        let source_map = map_instructions_to_source(&machine_file)?;
 
         for section in &machine_file.sections {
             if let Section::Code(code_section) = section {
@@ -60,15 +59,12 @@ pub fn sections_commands(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error
         .cloned()
         .collect();
 
-    // Create a new arena and registry to manage the files
-    let arena = Arena::new();
-    let mut registry = AsmRegistry::new(&arena);
 
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
-        registry.add_file(file_path.clone())?;
-        let machine_file = registry.map.get(&file_path).ok_or("File not found in registry")?;
+        let buffer = fs::read(file_path)?;
+        let machine_file = MachineFile::parse(&buffer)?;
         
         for section in &machine_file.sections {
             match section {
@@ -104,30 +100,30 @@ pub fn source_view_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         .cloned()
         .collect();
 
-    // Create a new arena and registry to manage the files
-    let arena = Arena::new();
-    let mut registry = AsmRegistry::new(&arena);
-
-    // Load files into registry
-    for file_path in file_paths {
-        println!("{}", format!("Loading file {:?}", file_path).green().bold());
-        registry.add_file(file_path.clone())?;
-    }
 
     // Initialize a basic editor interface
     // TODO: Use a library like `crossterm` to set up the interface
     // For now, placeholder logic to prompt file selection
-    let mut filemaps: Vec<FileLineMapping> = Vec::new();
+    let mut filemaps: Vec<AddressFileMapping> = Vec::new();
     let mut source_files: HashSet<String> = HashSet::new();
 
-    for machine_file in registry.map.values() {
 
-        let map = map_instructions_to_source(machine_file)?;
+    // Load files into registry
+    for file_path in file_paths {
+        println!("{}", format!("Loading file {:?}", file_path).green().bold());
+        // registry.add_file(file_path.clone())?;
+
+        let buffer = fs::read(file_path)?;
+        let machine_file = MachineFile::parse(&buffer)?;
+
+        let map = map_instructions_to_source(&machine_file)?;
         for (s,_) in map.values() {
             source_files.insert(s.to_string());
         }
         filemaps.push(map);
     }
+
+
 
     println!("Select a file to view:");
     for (index, file) in source_files.iter().enumerate() {
