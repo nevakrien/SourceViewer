@@ -32,12 +32,31 @@ pub struct State {
     pub original_dir: PathBuf,
     pub list_state: ListState,
     pub mode: Mode,
-    pub file_content: Vec<String>,
+    pub file_content: Vec<Line>,
     pub file_scroll: usize,
     pub file_path: String,
 
     pub show_lines: bool
 }
+
+pub struct Line {
+    content: String,
+    is_selected: bool,
+    line_number: usize, // Optionally store the line number
+    debug_info: Option<String>,  // Placeholder for future debug information
+}
+
+impl Line {
+    fn new(content: String, line_number: usize) -> Self {
+        Self {
+            content,
+            is_selected: false,
+            line_number,
+            debug_info: None,
+        }
+    }
+}
+
 
 impl State {
     pub fn new() -> Self {
@@ -170,12 +189,11 @@ pub fn render_file_viewer(
             .iter()
             .skip(state.file_scroll)
             .take(size.height as usize - 2)
-            .enumerate()
-            .map(|(i, line)| {
+            .map(|line| {
                 if state.show_lines {
-                    create_line_with_number(i + state.file_scroll, line)
+                    create_line_with_number(line, state.file_scroll)
                 } else {
-                    create_line_without_number(line)
+                    create_line_without_number(line, state.file_scroll)
                 }
             })
             .collect();
@@ -186,20 +204,42 @@ pub fn render_file_viewer(
     Ok(())
 }
 
-// Helper function to create a line with a line number
-fn create_line_with_number(line_number: usize, line: &str) -> Spans {
+// Helper function to create a line with a line number and styling based on selection and cursor
+fn create_line_with_number(line: &Line, current_line_index: usize) -> Spans {
+    let is_current_line = line.line_number == current_line_index + 1; // DWARF lines are 1-based
+
     let line_number_span = Span::styled(
-        format!("{:<4} ", line_number + 1),
+        format!("{:<4} ", line.line_number),
         Style::default().fg(Color::Blue),
     );
-    let line_content_span = Span::raw(line.to_string());
+
+    // Apply red color if selected, otherwise use default; add background if it's the cursor line
+    let line_style = if line.is_selected {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    }
+    .bg(if is_current_line { Color::DarkGray } else { Color::Reset });
+
+    let line_content_span = Span::styled(line.content.clone(), line_style);
     Spans::from(vec![line_number_span, line_content_span])
 }
 
-// Helper function to create a line without a line number
-fn create_line_without_number(line: &str) -> Spans {
-    Spans::from(Span::raw(line.to_string()))
+// Helper function to create a line without a line number and styling based on selection and cursor
+fn create_line_without_number(line: &Line, current_line_index: usize) -> Spans {
+    let is_current_line = line.line_number == current_line_index + 1; // DWARF lines are 1-based
+
+    let line_style = if line.is_selected {
+        Style::default().fg(Color::Red)
+    } else {
+        Style::default()
+    }
+    .bg(if is_current_line { Color::DarkGray } else { Color::Reset });
+
+    let line_content_span = Span::styled(line.content.clone(), line_style);
+    Spans::from(vec![line_content_span])
 }
+
 
 
 
@@ -217,6 +257,14 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
                 if state.file_scroll < state.file_content.len().saturating_sub(1) {
                     state.file_scroll += 1;
                 }
+            },
+
+            KeyCode::Enter => {
+                if let Some(line) = state.file_content.get_mut(state.file_scroll) {
+                    line.is_selected = !line.is_selected;
+                } else {
+                    unreachable!();
+                }
             }
 
             KeyCode::Char('l') => state.show_lines = !state.show_lines, 
@@ -228,8 +276,14 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
     Ok(false)
 }
 
-pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<String>> {
+pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
-    Ok(reader.lines().filter_map(Result::ok).collect())
+    Ok(reader.lines().filter_map(Result::ok)
+        .enumerate()
+        .map(|(i, s)|
+            Line::new(s,i+1)
+        )
+
+        .collect())
 }
