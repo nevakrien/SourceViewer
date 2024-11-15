@@ -34,29 +34,11 @@ pub struct State {
     pub mode: Mode,
     pub file_content: Vec<Line>,
     pub file_scroll: usize,
+    pub cursor: usize,
     pub file_path: String,
 
     pub show_lines: bool
 }
-
-pub struct Line {
-    content: String,
-    is_selected: bool,
-    line_number: usize, // Optionally store the line number
-    debug_info: Option<String>,  // Placeholder for future debug information
-}
-
-impl Line {
-    fn new(content: String, line_number: usize) -> Self {
-        Self {
-            content,
-            is_selected: false,
-            line_number,
-            debug_info: None,
-        }
-    }
-}
-
 
 impl State {
     pub fn new() -> Self {
@@ -67,12 +49,32 @@ impl State {
             mode: Mode::Dir,
             file_content: Vec::new(),
             file_scroll: 0,
+            cursor: 0,
             file_path: String::new(),
 
             show_lines: false,
         }
     }
 }
+
+pub struct Line {
+    content: String,
+    is_selected: bool,
+    line_number: usize, // Optionally store the line number
+    // debug_info: Option<String>,  // Placeholder for future debug information
+}
+
+impl Line {
+    fn new(content: String, line_number: usize) -> Self {
+        Self {
+            content,
+            is_selected: false,
+            line_number,
+            // debug_info: None,
+        }
+    }
+}
+
 
 pub fn create_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, io::Error> {
     execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
@@ -145,10 +147,8 @@ pub fn handle_directory_input(
                         state.current_dir = path;
                         state.list_state.select(Some(0));
                     } else if path.is_file() {
-                        state.file_content = read_file_lines(&path)?;
-                        state.file_path = path.display().to_string();
-                        state.mode = Mode::File;
-                        state.file_scroll = 0;
+                        load_file(state,&path)?;
+
                     }
                 }
             }
@@ -166,12 +166,31 @@ pub fn handle_directory_input(
     Ok(false)
 }
 
+pub fn load_file(state:&mut State,path:&PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    state.file_content = read_file_lines(path)?;
+    state.file_path = path.display().to_string();
+    state.mode = Mode::File;
+    state.file_scroll = 0;
+    state.cursor = 0;
+    Ok(())
+}
+
+
 pub fn render_file_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    state: &State,
+    state: &mut State,  // Pass state as mutable
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
         let size = f.size();
+        let max_visible_lines = size.height.saturating_sub(2) as usize;
+
+        // Adjust `file_scroll` to keep `cursor` within the visible range
+        if state.cursor < state.file_scroll {
+            state.file_scroll = state.cursor; // Scroll up
+        } else if state.cursor >= state.file_scroll + max_visible_lines {
+            state.file_scroll = state.cursor - max_visible_lines + 1; // Scroll down
+        }
+
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(100)].as_ref())
@@ -184,97 +203,110 @@ pub fn render_file_viewer(
                 Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
             ));
 
-        let content: Vec<Spans> = state
+        let items: Vec<ListItem> = state
             .file_content
             .iter()
             .skip(state.file_scroll)
-            .take(size.height as usize - 2)
+            .take(max_visible_lines)
             .map(|line| {
                 if state.show_lines {
-                    create_line_with_number(line, state.file_scroll)
+                    ListItem::new(vec![create_line_with_number(line)])
                 } else {
-                    create_line_without_number(line, state.file_scroll)
+                    ListItem::new(vec![create_line_without_number(line)])
                 }
             })
             .collect();
 
-        let paragraph = Paragraph::new(content).block(file_block);
-        f.render_widget(paragraph, layout[0]);
+        let mut list_state = ListState::default();
+        list_state.select(Some(state.cursor - state.file_scroll));
+
+        let list = List::new(items)
+            .block(file_block)
+            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+
+        f.render_stateful_widget(list, layout[0], &mut list_state);
     })?;
     Ok(())
 }
 
-// Helper function to create a line with a line number and styling based on selection and cursor
-fn create_line_with_number(line: &Line, current_line_index: usize) -> Spans {
-    let is_current_line = line.line_number == current_line_index + 1; // DWARF lines are 1-based
 
+// Helper function to create a line with a line number and styling
+fn create_line_with_number(line: &Line) -> Spans {
     let line_number_span = Span::styled(
         format!("{:<4} ", line.line_number),
         Style::default().fg(Color::Blue),
     );
 
-    // Apply red color if selected, otherwise use default; add background if it's the cursor line
     let line_style = if line.is_selected {
         Style::default().fg(Color::Red)
     } else {
         Style::default()
-    }
-    .bg(if is_current_line { Color::DarkGray } else { Color::Reset });
+    };
 
     let line_content_span = Span::styled(line.content.clone(), line_style);
     Spans::from(vec![line_number_span, line_content_span])
 }
 
-// Helper function to create a line without a line number and styling based on selection and cursor
-fn create_line_without_number(line: &Line, current_line_index: usize) -> Spans {
-    let is_current_line = line.line_number == current_line_index + 1; // DWARF lines are 1-based
-
+// Helper function to create a line without a line number and styling
+fn create_line_without_number(line: &Line) -> Spans {
     let line_style = if line.is_selected {
         Style::default().fg(Color::Red)
     } else {
         Style::default()
-    }
-    .bg(if is_current_line { Color::DarkGray } else { Color::Reset });
+    };
 
     let line_content_span = Span::styled(line.content.clone(), line_style);
     Spans::from(vec![line_content_span])
 }
 
 
-
-
-
 pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
             KeyCode::Char('q') => return Ok(true),
+
             KeyCode::Up | KeyCode::Char('w') => {
-                if state.file_scroll > 0 {
-                    state.file_scroll -= 1;
+                if state.cursor > 0 {
+                    state.cursor -= 1;
+
+                    // Scroll up if cursor is above the visible range
+                    if state.cursor < state.file_scroll {
+                        state.file_scroll = state.cursor;
+                    }
                 }
             }
+
             KeyCode::Down | KeyCode::Char('s') => {
-                if state.file_scroll < state.file_content.len().saturating_sub(1) {
-                    state.file_scroll += 1;
+                if state.cursor < state.file_content.len().saturating_sub(1) {
+                    state.cursor += 1;
+
+                    // Scroll down if cursor goes below the visible range
+                    let max_visible_lines = state.file_content.len().saturating_sub(1);
+                    if state.cursor >= state.file_scroll + max_visible_lines {
+                        state.file_scroll = state.cursor - max_visible_lines + 1;
+                    }
                 }
             },
 
             KeyCode::Enter => {
-                if let Some(line) = state.file_content.get_mut(state.file_scroll) {
+                // Toggle selection of the current line under the cursor
+                if let Some(line) = state.file_content.get_mut(state.cursor) {
                     line.is_selected = !line.is_selected;
                 } else {
                     unreachable!();
                 }
             }
 
-            KeyCode::Char('l') => state.show_lines = !state.show_lines, 
+            KeyCode::Char('l') => state.show_lines = !state.show_lines,
 
             KeyCode::Esc => state.mode = Mode::Dir,
+
             _ => {}
         }
     }
     Ok(false)
 }
+
 
 pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
     let file = File::open(path)?;

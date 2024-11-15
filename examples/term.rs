@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Mode::File => {
-                render_file_viewer(&mut terminal, &state)?;
+                render_file_viewer(&mut terminal, &mut state)?;
                 if handle_file_input(&mut state)? {
                     break;
                 }
