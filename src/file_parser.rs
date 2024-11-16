@@ -1,5 +1,3 @@
-use addr2line::LookupResult;
-use capstone::InsnGroupType;
 use goblin::pe;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -69,58 +67,37 @@ impl fmt::Display for InstructionDetail {
 impl InstructionDetail {
     /// Check if the instruction belongs to a specific group
     pub fn has_group(&self, group: u32) -> bool {
-        self.groups.iter().any(|&g| g == InsnGroupId{0:group as u8})
+        self.groups.iter().any(|&g| g == InsnGroupId(group as u8))
     }
 }
 
 pub struct DebugInstruction<'a>{
     ins: InstructionDetail,
     addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
+    //needs a way to load the Sup files which are machine files... 
+    //probably means we need the asm registry
 }
 
-impl<'a> fmt::Debug for DebugInstruction<'a> {
+impl<'a> fmt::Display for DebugInstruction<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        // Format the address and mnemonic
-        let mut result = format!("{:#010x}: {}", self.ins.address, self.ins.mnemonic);
-
-        // Extract the target address, assuming `op_str` contains the address we want to replace
-        if let Some(target_addr) = self.extract_target_address() {
-            // Look up the function name using the address, if available
-            if let Some(function_name) = self.resolve_function_name(target_addr) {
-                // Replace the address in `op_str` with the function name
-                let replaced_op_str = self.ins.op_str.replacen(
-                    &format!("0x{:x}", target_addr), // address to replace
-                    &format!("<{}>", function_name), // replacement with function name
-                    1, // replace only the first occurrence
-                );
-                result = format!("{} {}", result, replaced_op_str);
-            } else {
-                // If no function name, use `op_str` as-is
-                result = format!("{} {}", result, self.ins.op_str);
-            }
-        } else {
-            // If no address is found, use `op_str` as-is
-            result = format!("{} {}", result, self.ins.op_str);
-        }
-
-        write!(f, "{}", result)
+        write!(f,"{:#010x} {}: {} {}",
+            self.ins.address, 
+            self.get_func_name().unwrap_or("<unknown>".to_string()),
+            self.ins.mnemonic,
+            self.ins.op_str, //this needs a fixup
+        )
     }
 }
+
 
 
 impl<'a> DebugInstruction<'a> {
     pub fn new(ins: InstructionDetail,addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>) -> Self {
         DebugInstruction{ins,addr2line}
     }
-    /// Convert `DebugInstruction` to a `String` using the `fmt::Debug` implementation
-    pub fn to_string(&self) -> String {
-        format!("{:?}", self)
-    }
-    
-    /// Helper function to extract the target address from `op_str`
-    fn extract_target_address(&self) -> Option<u64> {
-        // Attempt to parse `op_str` as an address, which assumes `op_str` is a hex string.
-        u64::from_str_radix(self.ins.op_str.trim_start_matches("0x"), 16).ok()
+
+    pub fn get_func_name(&self ) ->Option<String> {
+        self.resolve_function_name(self.ins.address)
     }
 
     /// Resolve the function name for a given address using addr2line
@@ -128,35 +105,45 @@ impl<'a> DebugInstruction<'a> {
         // Start the frame lookup process
         let lookup_result = self.addr2line.find_frames(address);
 
-        // Loop to handle potential loading of additional DWARF data
-        loop {
-            match lookup_result {
-                // If the lookup requires loading additional DWARF data
-                LookupResult::Load { load: _, continuation: _ } => {
-                    return None;
-                    // // Attempt to load the required DWARF data
-                    // // This is a placeholder; you'll need to implement the actual loading logic
-                    // let dwo = load_dwarf_data(load);
+        let mut frames = lookup_result.skip_all_loads().ok()?;
+        while let Ok(Some(frame)) = frames.next() {
+            if let Some(name) = frame.function {
+                return name.demangle().ok().map(|s| s.to_string());
 
-                    // // Resume the lookup with the loaded data
-                    // lookup_result = continuation.resume(dwo);
-                }
-                // If the lookup has completed and produced an output
-                LookupResult::Output(Ok(mut frames)) => {
-                    // Iterate over frames to find the function name
-                    while let Ok(Some(frame)) = frames.next() {
-                        if let Some(name) = frame.function {
-                            return Some(name.demangle().unwrap_or_else(|_| "<unknown>".into()).to_string());
-                        }
-                    }
-                    return None; // No function name found
-                }
-                // If the lookup has completed with an error
-                LookupResult::Output(Err(_)) => {
-                    return None; // Handle the error as needed
-                }
             }
         }
+        None 
+                
+        // // Loop to handle potential loading of additional DWARF data
+        // loop { 
+        //     match lookup_result {
+        //         // If the lookup requires loading additional DWARF data
+        //         LookupResult::Load { load: _, continuation: _ } => {
+        //             return None;
+        //             // // Attempt to load the required DWARF data
+        //             // // This is a placeholder; you'll need to implement the actual loading logic
+        //             // let dwo = load_dwarf_data(load);
+
+        //             // // Resume the lookup with the loaded data
+        //             // lookup_result = continuation.resume(dwo);
+        //         }
+        //         // If the lookup has completed and produced an output
+        //         LookupResult::Output(Ok(mut frames)) => {
+        //             // Iterate over frames to find the function name
+        //             while let Ok(Some(frame)) = frames.next() {
+        //                 if let Some(name) = frame.function {
+        //                     return name.demangle().ok().map(|s| s.to_string());
+
+        //                 }
+        //             }
+        //             return None; // No function name found
+        //         }
+        //         // If the lookup has completed with an error
+        //         LookupResult::Output(Err(_)) => {
+        //             return None; // Handle the error as needed
+        //         }
+        //     }
+        // }
     }
 }
 

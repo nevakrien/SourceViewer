@@ -9,6 +9,35 @@ use std::collections::{HashMap,BTreeMap,HashSet};
 use crate::file_parser::MachineFile;
 
 
+use typed_arena::Arena;
+use  std::collections::hash_map;
+
+//probably needed to handle the suplementry matrial
+pub struct AsmRegistry<'a> {
+    pub files_arena: &'a Arena<Vec<u8>>,
+    pub map: HashMap<Arc<PathBuf>, MachineFile<'a>>
+}
+
+impl<'a> AsmRegistry<'a> {
+    pub fn new( files_arena: &'a Arena<Vec<u8>>) -> Self {
+        AsmRegistry{
+            files_arena,
+            map:HashMap::new()
+        }
+    }
+    pub fn get_machine(&mut self, path:Arc<PathBuf>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
+        match self.map.entry(path.clone()) {
+            hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),  
+            hash_map::Entry::Vacant(entry) => {
+                let buffer = fs::read(&*path)?;
+                let b = self.files_arena.alloc(buffer);
+                Ok(entry.insert(MachineFile::parse(b)?))
+            }
+        }
+        
+    }
+}
+
 pub type AddressFileMapping = HashMap<u64, (String, u32)>; // address -> (file, line)
 
 pub fn map_instructions_to_source(
@@ -56,15 +85,16 @@ impl CodeFile {
 }
 
 #[derive(Default)]
-pub struct SourceMap {
+pub struct CodeRegistry {
     pub source_files :HashMap<PathBuf,CodeFile>,
-    pub visited : HashSet<PathBuf>
+    pub visited : HashSet<PathBuf>,
+    // pub asm: AsmRegistry<'a>,
 }
 
 
-impl SourceMap {
+impl CodeRegistry {
     pub fn new() -> Self {
-        SourceMap::default()
+        CodeRegistry::default()
     }
 
     pub fn visit_source_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>>{
@@ -77,19 +107,15 @@ impl SourceMap {
         Ok(())
     }
 
-    pub fn visit_machine_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>> {
+    pub fn visit_machine_file(&mut self,path : Arc<PathBuf>,asm:&mut AsmRegistry) -> Result<(),Box<dyn Error>> {
         if !self.visited.insert(path.to_path_buf()) {
             return Ok(());
         }
 
         //read and parse the file
-        let buffer = fs::read(path)?;
-        let machine_file = MachineFile::parse(&buffer)?;
+        let machine_file = asm.get_machine(path.clone())?;
         let ctx = Context::from_dwarf(machine_file.dwarf_loader.load_dwarf()?)?;
 
-        //add instructions to their spots
-
-        let file_name = Arc::new(path.to_path_buf());
 
         for section in &machine_file.sections {
             match section {
@@ -108,7 +134,7 @@ impl SourceMap {
                                 //insert
                                 let x = Instruction {
                                     detail: instruction.clone(),
-                                    file: file_name.clone()
+                                    file: path.clone()
                                 };
 
                                 file.asm.entry(line).or_default().push(x);
