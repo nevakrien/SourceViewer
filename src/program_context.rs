@@ -1,3 +1,5 @@
+use gimli::EndianSlice;
+use gimli::RunTimeEndian;
 use std::sync::Arc;
 use std::path::{Path,PathBuf};
 use crate::file_parser::InstructionDetail;
@@ -62,6 +64,51 @@ pub fn map_instructions_to_source(
     }
 
     Ok(mapping)
+}
+
+pub fn resolve_func_name(addr2line: &addr2line::Context<EndianSlice<'_, RunTimeEndian>>,address: u64) ->Option<String>{
+    // Start the frame lookup process
+        let lookup_result = addr2line.find_frames(address);
+
+        let mut frames = lookup_result.skip_all_loads().ok()?;
+        while let Ok(Some(frame)) = frames.next() {
+            if let Some(name) = frame.function {
+                return name.demangle().ok().map(|s| s.to_string());
+
+            }
+        }
+        None 
+                
+        // // Loop to handle potential loading of additional DWARF data
+        // loop { 
+        //     match lookup_result {
+        //         // If the lookup requires loading additional DWARF data
+        //         LookupResult::Load { load: _, continuation: _ } => {
+        //             return None;
+        //             // // Attempt to load the required DWARF data
+        //             // // This is a placeholder; you'll need to implement the actual loading logic
+        //             // let dwo = load_dwarf_data(load);
+
+        //             // // Resume the lookup with the loaded data
+        //             // lookup_result = continuation.resume(dwo);
+        //         }
+        //         // If the lookup has completed and produced an output
+        //         LookupResult::Output(Ok(mut frames)) => {
+        //             // Iterate over frames to find the function name
+        //             while let Ok(Some(frame)) = frames.next() {
+        //                 if let Some(name) = frame.function {
+        //                     return name.demangle().ok().map(|s| s.to_string());
+
+        //                 }
+        //             }
+        //             return None; // No function name found
+        //         }
+        //         // If the lookup has completed with an error
+        //         LookupResult::Output(Err(_)) => {
+        //             return None; // Handle the error as needed
+        //         }
+        //     }
+        // }
 }
 
 pub struct Instruction{
@@ -148,5 +195,39 @@ impl CodeRegistry {
         } ;
         todo!()
 
+    }
+}
+
+
+
+pub struct DebugInstruction<'a>{
+    ins: InstructionDetail,
+    addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
+    //needs a way to load the Sup files which are machine files... 
+    //probably means we need the asm registry
+}
+
+impl<'a> DebugInstruction<'a> {
+    pub fn new(ins: InstructionDetail,addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>) -> Self {
+        DebugInstruction{ins,addr2line}
+    }
+
+    pub fn get_func_name(&self ) ->Option<String> {
+        self.resolve_function_name(self.ins.address)
+    }
+
+    pub fn get_string_allways(&self) -> String {
+        format!("{:#010x}: {:<6} {:<30} {}",
+            
+            self.ins.address, 
+            self.ins.mnemonic,
+            self.ins.op_str, //this needs a fixup
+            self.get_func_name().unwrap_or("<unknown>".to_string()),
+        )
+    }
+
+    /// Resolve the function name for a given address using addr2line
+    fn resolve_function_name(&self, address: u64) -> Option<String> {
+        resolve_func_name(self.addr2line,address)
     }
 }

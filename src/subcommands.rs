@@ -1,4 +1,5 @@
-use crate::file_parser::DebugInstruction;
+use crate::program_context::resolve_func_name;
+use crate::program_context::DebugInstruction;
 use crate::file_parser::MachineFile;
 use std::fs;
 use std::collections::HashSet;
@@ -23,7 +24,7 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
         let machine_file = MachineFile::parse(&buffer)?;
-        let ctx = addr2line::Context::from_dwarf(machine_file.dwarf_loader.load_dwarf()?)?;
+        let ctx = addr2line::Context::from_dwarf(machine_file.load_dwarf()?)?;
 
         let source_map = map_instructions_to_source(&machine_file)?;
 
@@ -35,9 +36,9 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
                         let debug_ins = DebugInstruction::new(instruction.clone(),&ctx);
 
                         println!(
-                            "{} \"{}\" {} {} {} {} ",
+                            "{:<4} {} {} {} {} {} ",
                             i.to_string().blue(),
-                            debug_ins.to_string().bold(),
+                            debug_ins.get_string_allways().bold(),
                             "in file".cyan(),
                             file.to_string().yellow(),
                             "at line".cyan(),
@@ -66,6 +67,10 @@ pub fn sections_commands(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
         let machine_file = MachineFile::parse(&buffer)?;
+        let debug = machine_file.load_dwarf().ok().and_then(|dwarf_data| {
+            addr2line::Context::from_dwarf(dwarf_data).ok()
+        });
+
         
         for section in &machine_file.sections {
             match section {
@@ -75,8 +80,19 @@ pub fn sections_commands(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error
                         code_section.name,
                         code_section.instructions.len()
                     );
+
+                    
+
                     for instruction in &code_section.instructions {
-                        println!("  {}", instruction);
+                        let func_name = match &debug {
+                            None => None,
+                            Some(ctx) => resolve_func_name(ctx,instruction.address)
+
+                        };
+                        // func_name.as_mut().map(|x| x.push_str(" "));
+                        // println!("  {}", instruction);
+                        println!("  {:#010x}: {:<6} {:<30} {}",instruction.address, instruction.mnemonic, instruction.op_str
+                            ,func_name.as_deref().unwrap_or(""))
                     }
                 }
                 Section::Info(non_exec_section) => {
