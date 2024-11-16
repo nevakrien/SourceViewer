@@ -1,3 +1,5 @@
+use addr2line::LookupResult;
+use capstone::InsnGroupType;
 use goblin::pe;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -52,6 +54,10 @@ pub struct InstructionDetail {
     pub address: u64,
     pub mnemonic: Box<str>,
     pub op_str: Box<str>,
+
+    pub read_regs : Box<[RegId]>,
+    pub write_regs : Box<[RegId]>,
+    pub groups: Box<[InsnGroupId]>,
 }
 
 impl fmt::Display for InstructionDetail {
@@ -59,6 +65,101 @@ impl fmt::Display for InstructionDetail {
         write!(f, "{:#010x}: {} {}", self.address, self.mnemonic, self.op_str)
     }
 }
+
+impl InstructionDetail {
+    /// Check if the instruction belongs to a specific group
+    pub fn has_group(&self, group: u32) -> bool {
+        self.groups.iter().any(|&g| g == InsnGroupId{0:group as u8})
+    }
+}
+
+pub struct DebugInstruction<'a>{
+    ins: InstructionDetail,
+    addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
+}
+
+impl<'a> fmt::Debug for DebugInstruction<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        // Format the address and mnemonic
+        let mut result = format!("{:#010x}: {}", self.ins.address, self.ins.mnemonic);
+
+        // Extract the target address, assuming `op_str` contains the address we want to replace
+        if let Some(target_addr) = self.extract_target_address() {
+            // Look up the function name using the address, if available
+            if let Some(function_name) = self.resolve_function_name(target_addr) {
+                // Replace the address in `op_str` with the function name
+                let replaced_op_str = self.ins.op_str.replacen(
+                    &format!("0x{:x}", target_addr), // address to replace
+                    &format!("<{}>", function_name), // replacement with function name
+                    1, // replace only the first occurrence
+                );
+                result = format!("{} {}", result, replaced_op_str);
+            } else {
+                // If no function name, use `op_str` as-is
+                result = format!("{} {}", result, self.ins.op_str);
+            }
+        } else {
+            // If no address is found, use `op_str` as-is
+            result = format!("{} {}", result, self.ins.op_str);
+        }
+
+        write!(f, "{}", result)
+    }
+}
+
+
+impl<'a> DebugInstruction<'a> {
+    pub fn new(ins: InstructionDetail,addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>) -> Self {
+        DebugInstruction{ins,addr2line}
+    }
+    /// Convert `DebugInstruction` to a `String` using the `fmt::Debug` implementation
+    pub fn to_string(&self) -> String {
+        format!("{:?}", self)
+    }
+    
+    /// Helper function to extract the target address from `op_str`
+    fn extract_target_address(&self) -> Option<u64> {
+        // Attempt to parse `op_str` as an address, which assumes `op_str` is a hex string.
+        u64::from_str_radix(self.ins.op_str.trim_start_matches("0x"), 16).ok()
+    }
+
+    /// Resolve the function name for a given address using addr2line
+    fn resolve_function_name(&self, address: u64) -> Option<String> {
+        // Start the frame lookup process
+        let lookup_result = self.addr2line.find_frames(address);
+
+        // Loop to handle potential loading of additional DWARF data
+        loop {
+            match lookup_result {
+                // If the lookup requires loading additional DWARF data
+                LookupResult::Load { load: _, continuation: _ } => {
+                    return None;
+                    // // Attempt to load the required DWARF data
+                    // // This is a placeholder; you'll need to implement the actual loading logic
+                    // let dwo = load_dwarf_data(load);
+
+                    // // Resume the lookup with the loaded data
+                    // lookup_result = continuation.resume(dwo);
+                }
+                // If the lookup has completed and produced an output
+                LookupResult::Output(Ok(mut frames)) => {
+                    // Iterate over frames to find the function name
+                    while let Ok(Some(frame)) = frames.next() {
+                        if let Some(name) = frame.function {
+                            return Some(name.demangle().unwrap_or_else(|_| "<unknown>".into()).to_string());
+                        }
+                    }
+                    return None; // No function name found
+                }
+                // If the lookup has completed with an error
+                LookupResult::Output(Err(_)) => {
+                    return None; // Handle the error as needed
+                }
+            }
+        }
+    }
+}
+
 
 // Define a struct to hold DWARF section data
 #[derive(Clone,Debug,PartialEq)]
@@ -131,7 +232,7 @@ impl<'a> DwarfSectionLoader<'a> {
 
     // Method to retrieve a section's data by its DWARF SectionId
     pub fn get_section(&self, section: SectionId) -> &'a [u8] {
-        self.sections.get(&section).map(|x| *x).unwrap_or(&[])
+        self.sections.get(&section).copied().unwrap_or(&[])
     }
 
     // Method to load DWARF data using the stored sections
@@ -160,7 +261,7 @@ impl<'a> MachineFile<'a> {
         let endian = if elf.little_endian { RunTimeEndian::Little } else { RunTimeEndian::Big };
 
         // Create Capstone instance dynamically
-        let cs = create_capstone_elf(&elf)?;
+        let cs = create_capstone_elf(elf)?;
         let mut parsed_sections = Vec::new();
         let mut dw = DwarfSectionLoader::new(endian);
 
@@ -174,10 +275,14 @@ impl<'a> MachineFile<'a> {
                 let disasm = cs.disasm_all(section_data, section.sh_addr)?;
                 let mut instructions = Vec::new();
                 for insn in disasm.iter() {
+                    let detail =  cs.insn_detail(insn)?;
                     instructions.push(InstructionDetail {
                         address: insn.address(),
                         mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
                         op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
+                        groups: detail.groups().into(),
+                        write_regs: detail.regs_write().into(),
+                        read_regs: detail.regs_read().into(),
                     });
                 }
 
@@ -208,7 +313,7 @@ impl<'a> MachineFile<'a> {
         // Determine endianness (Mach-O defaults to little-endian on macOS)
         let endian = RunTimeEndian::Little;
 
-        let cs = create_capstone_mach(&mach)?;
+        let cs = create_capstone_mach(mach)?;
         let mut parsed_sections = Vec::new();
         let mut dw = DwarfSectionLoader::new(endian);
 
@@ -226,10 +331,14 @@ impl<'a> MachineFile<'a> {
                         let disasm = cs.disasm_all(section_data, section.addr)?;
                         let mut instructions = Vec::new();
                         for insn in disasm.iter() {
+                            let detail =  cs.insn_detail(insn)?;
                             instructions.push(InstructionDetail {
                                 address: insn.address(),
                                 mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
                                 op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
+                                groups: detail.groups().into(),
+                                write_regs: detail.regs_write().into(),
+                                read_regs: detail.regs_read().into(),
                             });
                         }
 
@@ -280,10 +389,14 @@ impl<'a> MachineFile<'a> {
                 let disasm = cs.disasm_all(section_data, section.virtual_address as u64)?;
                 let mut instructions = Vec::new();
                 for insn in disasm.iter() {
+                    let detail =  cs.insn_detail(insn)?;
                     instructions.push(InstructionDetail {
                         address: insn.address(),
                         mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
                         op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
+                        groups: detail.groups().into(),
+                        write_regs: detail.regs_write().into(),
+                        read_regs: detail.regs_read().into(),
                     });
                 }
 
@@ -317,34 +430,34 @@ impl<'a> MachineFile<'a> {
 pub fn create_capstone_elf(elf: &elf::Elf) -> Result<Capstone, Box<dyn Error>> {
     let cs = match elf.header.e_machine {
         elf::header::EM_X86_64 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode64).build()?
+            Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(true).build()?
         }
         elf::header::EM_386 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode32).build()?
+            Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(true).build()?
         }
         elf::header::EM_ARM => {
-            Capstone::new().arm().mode(arm::ArchMode::Arm).build()?
+            Capstone::new().arm().mode(arm::ArchMode::Arm).detail(true).build()?
         }
         elf::header::EM_AARCH64 => {
-            Capstone::new().arm64().mode(arm64::ArchMode::Arm).build()?
+            Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(true).build()?
         }
         elf::header::EM_RISCV => {
-            Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV64).build()?
+            Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV64).detail(true).build()?
         }
         elf::header::EM_MIPS => {
-            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).build()?
+            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).detail(true).build()?
         }
         elf::header::EM_PPC => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
         }
         elf::header::EM_PPC64 => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).build()?
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).detail(true).build()?
         }
         elf::header::EM_SPARC => {
-            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::Default).build()?
+            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::Default).detail(true).build()?
         }
         elf::header::EM_SPARCV9 => {
-            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::V9).build()?
+            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::V9).detail(true).build()?
         }
         // Add more architectures as needed
         _ => return Err("Unsupported architecture".into()),
@@ -358,22 +471,22 @@ pub fn create_capstone_mach(mach: &Mach<'_>) -> Result<Capstone, Box<dyn Error>>
         Mach::Binary(mach_bin) => {
             match mach_bin.header.cputype {
                 goblin::mach::constants::cputype::CPU_TYPE_X86_64 => {
-                    Capstone::new().x86().mode(x86::ArchMode::Mode64).build()?
+                    Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(true).build()?
                 }
                 goblin::mach::constants::cputype::CPU_TYPE_X86 => {
-                    Capstone::new().x86().mode(x86::ArchMode::Mode32).build()?
+                    Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(true).build()?
                 }
                 goblin::mach::constants::cputype::CPU_TYPE_ARM => {
-                    Capstone::new().arm().mode(arm::ArchMode::Arm).build()?
+                    Capstone::new().arm().mode(arm::ArchMode::Arm).detail(true).build()?
                 }
                 goblin::mach::constants::cputype::CPU_TYPE_ARM64 => {
-                    Capstone::new().arm64().mode(arm64::ArchMode::Arm).build()?
+                    Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(true).build()?
                 }
                 goblin::mach::constants::cputype::CPU_TYPE_POWERPC => {
-                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
                 }
                 goblin::mach::constants::cputype::CPU_TYPE_POWERPC64 => {
-                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).build()?
+                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).detail(true).build()?
                 }
                 _ => return Err("Unsupported architecture".into()),
             }
@@ -387,28 +500,28 @@ pub fn create_capstone_mach(mach: &Mach<'_>) -> Result<Capstone, Box<dyn Error>>
 pub fn create_capstone_pe(pe: &pe::PE) -> Result<Capstone, Box<dyn Error>> {
     let cs = match pe.header.coff_header.machine {
         pe::header::COFF_MACHINE_X86_64 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode64).build()?
+            Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(true).build()?
         }
         pe::header::COFF_MACHINE_X86 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode32).build()?
+            Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(true).build()?
         }
         pe::header::COFF_MACHINE_ARM => {
-            Capstone::new().arm().mode(arm::ArchMode::Arm).build()?
+            Capstone::new().arm().mode(arm::ArchMode::Arm).detail(true).build()?
         }
         pe::header::COFF_MACHINE_ARM64 => {
-            Capstone::new().arm64().mode(arm64::ArchMode::Arm).build()?
+            Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(true).build()?
         }
         pe::header::COFF_MACHINE_MIPSFPU => {
-            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).build()?
+            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).detail(true).build()?
         }
         pe::header::COFF_MACHINE_MIPSFPU16 => {
-            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips32).build()?
+            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips32).detail(true).build()?
         }
         pe::header::COFF_MACHINE_POWERPC => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
         }
         pe::header::COFF_MACHINE_POWERPCFP => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).build()?
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
         }
 
         _ => return Err("Unsupported architecture".into()),

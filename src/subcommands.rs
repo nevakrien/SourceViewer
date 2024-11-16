@@ -1,10 +1,9 @@
-// use crate::program_context::AsmRegistry;
+use crate::file_parser::DebugInstruction;
 use crate::file_parser::MachineFile;
 use std::fs;
 use std::collections::HashSet;
 use crate::program_context::AddressFileMapping;
 use colored::*;
-// use typed_arena::Arena;
 use crate::file_parser::{Section};
 use std::path::PathBuf;
 use std::error::Error;
@@ -24,7 +23,8 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
         let machine_file = MachineFile::parse(&buffer)?;
-        
+        let ctx = addr2line::Context::from_dwarf(machine_file.dwarf_loader.load_dwarf()?)?;
+
         let source_map = map_instructions_to_source(&machine_file)?;
 
         for section in &machine_file.sections {
@@ -32,15 +32,16 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
                 println!("{}", section.name());
                 for (i, instruction) in code_section.instructions.iter().enumerate() {
                     if let Some((file, line)) = source_map.get(&instruction.address) {
+                        let debug_ins = DebugInstruction::new(instruction.clone(),&ctx);
+
                         println!(
-                            "{} \"{}\" {} {} {} {} {}",
+                            "{} \"{}\" {} {} {} {} ",
                             i.to_string().blue(),
-                            instruction.to_string().bold(),
+                            debug_ins.to_string().bold(),
                             "in file".cyan(),
                             file.to_string().yellow(),
                             "at line".cyan(),
-                            line.to_string().blue(),
-                            ""
+                            line.to_string().blue()
                         );
                     }
                 }

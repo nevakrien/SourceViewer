@@ -6,7 +6,7 @@ use tui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState},
     Terminal,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
@@ -38,6 +38,12 @@ pub struct State {
     pub file_path: String,
 
     pub show_lines: bool
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl State {
