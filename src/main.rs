@@ -1,3 +1,4 @@
+use colored::Colorize;
 use clap::{Arg, Command};
 use std::path::PathBuf;
 use std::error::Error;
@@ -34,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
 
         .subcommand(
-            Command::new("source_view")
+            Command::new("view_source")
                 .about("looks at the source code files")
                 .arg(
                     Arg::new("FILES")
@@ -43,6 +44,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .num_args(1..) // Allows multiple file paths
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
+        )
+
+        .subcommand(
+            {
+            let description = format!(
+                "{}: {}",
+                "Not Finished".red(),
+                "dumps the dwarf debug information in the files"
+            );
+            Command::new("dwarf_dump")
+                .about(description)
+                .arg(
+                    Arg::new("FILES")
+                        .help("Input binary/object files to process")
+                        .required(true)
+                        .num_args(1..) // Allows multiple file paths
+                        .value_parser(clap::value_parser!(PathBuf)),
+                )
+            },
         );
         
 
@@ -50,8 +70,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match matches.subcommand() {
         Some(("lines", sub_m)) => lines_command(sub_m),
-        Some(("sections", sub_m)) => sections_commands(sub_m),
-        Some(("source_view", sub_m)) => source_view_command(sub_m),
+        Some(("sections", sub_m)) => sections_command(sub_m),
+        Some(("view_source", sub_m)) => view_source_command(sub_m),
+        Some(("dwarf_dump", sub_m)) => dwarf_dump_command(sub_m),
         _ => {
             command.print_help()?;
             std::process::exit(1);

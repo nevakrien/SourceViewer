@@ -69,11 +69,12 @@ impl InstructionDetail {
 // Define a struct to hold DWARF section data
 #[derive(Clone,Debug,PartialEq)]
 pub struct DwarfSectionLoader<'a> {
-    sections: HashMap<SectionId, &'a [u8]>,
+    pub sections: HashMap<SectionId, &'a [u8]>,
     endian: RunTimeEndian,
 }
 
-#[derive(Debug)]
+
+#[derive(Debug,Clone)]
 struct DuplicateEntry;
 
 impl fmt::Display for DuplicateEntry {

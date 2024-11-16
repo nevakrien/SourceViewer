@@ -1,3 +1,5 @@
+use crate::program_context::AsmRegistry;
+use typed_arena::Arena;
 use crate::program_context::resolve_func_name;
 use crate::program_context::DebugInstruction;
 use crate::file_parser::MachineFile;
@@ -18,17 +20,17 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
         .cloned()
         .collect();
 
-
+    let arena = Arena::new();
+    let mut registry = AsmRegistry::new(&arena);
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
-        let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer)?;
+        let machine_file = registry.get_machine(file_path.into())?;
         let ctx = addr2line::Context::from_dwarf(machine_file.load_dwarf()?)?;
 
         let source_map = map_instructions_to_source(&machine_file)?;
 
-        for section in &machine_file.sections {
+        for section in &machine_file.sections.clone() {
             if let Section::Code(code_section) = section {
                 println!("{}", section.name());
                 for (i, instruction) in code_section.instructions.iter().enumerate() {
@@ -38,7 +40,7 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
                         println!(
                             "{:<4} {} {} {} {} {} ",
                             i.to_string().blue(),
-                            debug_ins.get_string_allways().bold(),
+                            debug_ins.get_string_load(&mut registry).bold(),
                             "in file".cyan(),
                             file.to_string().yellow(),
                             "at line".cyan(),
@@ -53,7 +55,33 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn sections_commands(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
+pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
+    // Collect all file paths provided by the user for the `sections` command
+    let file_paths: Vec<PathBuf> = matches
+        .get_many::<PathBuf>("FILES")
+        .expect("FILES argument is required")
+        .cloned()
+        .collect();
+
+    let message = "NOTE: this comand is not finised".to_string().red();
+    println!("{}", message);
+    // Iterate over each file path and process it
+    for file_path in file_paths {
+        println!("{}", format!("Loading file {:?}", file_path).green().bold());
+        let buffer = fs::read(file_path)?;
+        let machine_file = MachineFile::parse(&buffer)?;
+        // let dwarf = machine_file.load_dwarf()?;
+        // println!("{:#?}",dwarf );
+        for (id,v) in machine_file.dwarf_loader.sections {
+            println!("{:?}:\n{}",id,String::from_utf8_lossy(v) );
+        }
+    }
+    println!("{}", message);
+
+    Ok(())
+}
+
+pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `sections` command
     let file_paths: Vec<PathBuf> = matches
         .get_many::<PathBuf>("FILES")
@@ -109,8 +137,8 @@ pub fn sections_commands(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error
     Ok(())
 }
 
-pub fn source_view_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
-    // Collect all file paths provided by the user for the `source_view` command
+pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
+    // Collect all file paths provided by the user for the `view_source` command
     let file_paths: Vec<PathBuf> = matches
         .get_many::<PathBuf>("FILES")
         .expect("FILES argument is required")

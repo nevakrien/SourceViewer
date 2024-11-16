@@ -1,3 +1,8 @@
+use crate::errors::WrappedError;
+use std::rc::Rc;
+use std::fmt;
+use addr2line::LookupContinuation;
+use addr2line::LookupResult;
 use gimli::EndianSlice;
 use gimli::RunTimeEndian;
 use std::sync::Arc;
@@ -15,10 +20,15 @@ use typed_arena::Arena;
 use  std::collections::hash_map;
 
 //probably needed to handle the suplementry matrial
+
+
 pub struct AsmRegistry<'a> {
     pub files_arena: &'a Arena<Vec<u8>>,
-    pub map: HashMap<Arc<PathBuf>, MachineFile<'a>>
+    pub map: HashMap<Arc<Path>, Result<MachineFile<'a>,Box<WrappedError>> >
 }
+
+
+
 
 impl<'a> AsmRegistry<'a> {
     pub fn new( files_arena: &'a Arena<Vec<u8>>) -> Self {
@@ -27,18 +37,35 @@ impl<'a> AsmRegistry<'a> {
             map:HashMap::new()
         }
     }
-    pub fn get_machine(&mut self, path:Arc<PathBuf>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
+
+
+
+    pub fn get_machine(&mut self, path:Arc<Path>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
+        //code looks so ugly because we cant pull into a side function or the borrow checker will freak out
+        println!("geting data for {}",path.to_string_lossy());
+
         match self.map.entry(path.clone()) {
-            hash_map::Entry::Occupied(entry) => Ok(entry.into_mut()),  
+            hash_map::Entry::Occupied(entry) => entry.into_mut().as_ref().map_err(|e| e.clone().into()),
             hash_map::Entry::Vacant(entry) => {
-                let buffer = fs::read(&*path)?;
+                let buffer = match fs::read(&*path){
+                    Ok(x) => x,
+                    Err(e) => {return entry.insert(
+                        Err(
+                            Box::new(WrappedError::new(Box::new(e)))
+                            ))
+                        .as_ref().map_err(|e| e.clone().into())}
+                };
                 let b = self.files_arena.alloc(buffer);
-                Ok(entry.insert(MachineFile::parse(b)?))
+                entry.insert(MachineFile::parse(b)
+                    .map_err(|e| Box::new(WrappedError::new(e))))
+                    .as_ref().map_err(|e| e.clone().into())
             }
         }
         
     }
 }
+
+
 
 pub type AddressFileMapping = HashMap<u64, (String, u32)>; // address -> (file, line)
 
@@ -66,7 +93,9 @@ pub fn map_instructions_to_source(
     Ok(mapping)
 }
 
-pub fn resolve_func_name(addr2line: &addr2line::Context<EndianSlice<'_, RunTimeEndian>>,address: u64) ->Option<String>{
+pub type DebugContext<'a> = addr2line::Context<EndianSlice<'a, RunTimeEndian>>;
+
+pub fn resolve_func_name(addr2line: &DebugContext,address: u64) ->Option<String>{
     // Start the frame lookup process
         let lookup_result = addr2line.find_frames(address);
 
@@ -78,42 +107,59 @@ pub fn resolve_func_name(addr2line: &addr2line::Context<EndianSlice<'_, RunTimeE
             }
         }
         None 
+}          
+pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut AsmRegistry<'b>, address: u64) -> Option<String> {  
+    let mut lookup_result = addr2line.find_frames(address);
+
+    loop {
+        match lookup_result {
+            LookupResult::Load { load, continuation } => {
                 
-        // // Loop to handle potential loading of additional DWARF data
-        // loop { 
-        //     match lookup_result {
-        //         // If the lookup requires loading additional DWARF data
-        //         LookupResult::Load { load: _, continuation: _ } => {
-        //             return None;
-        //             // // Attempt to load the required DWARF data
-        //             // // This is a placeholder; you'll need to implement the actual loading logic
-        //             // let dwo = load_dwarf_data(load);
 
-        //             // // Resume the lookup with the loaded data
-        //             // lookup_result = continuation.resume(dwo);
-        //         }
-        //         // If the lookup has completed and produced an output
-        //         LookupResult::Output(Ok(mut frames)) => {
-        //             // Iterate over frames to find the function name
-        //             while let Ok(Some(frame)) = frames.next() {
-        //                 if let Some(name) = frame.function {
-        //                     return name.demangle().ok().map(|s| s.to_string());
+                // Construct the full path for the DWO file if possible
+               let dwo_path = load.comp_dir.as_ref()
+                .map(|comp_dir| std::path::PathBuf::from(comp_dir.to_string_lossy().to_string()))
+                .and_then(|comp_dir_path| load.path.as_ref()
+                    .map(|path| comp_dir_path.join(std::path::Path::new(&path.to_string_lossy().to_string())))
+                );
 
-        //                 }
-        //             }
-        //             return None; // No function name found
-        //         }
-        //         // If the lookup has completed with an error
-        //         LookupResult::Output(Err(_)) => {
-        //             return None; // Handle the error as needed
-        //         }
-        //     }
-        // }
+                println!("load case {:?}",dwo_path);
+
+                
+                let dwo = dwo_path.and_then(|full_path| 
+                    registry.get_machine(full_path.into()).ok()
+                        .and_then(|m| m.load_dwarf().ok())
+                        .map(Arc::new)
+                );
+
+
+                // Resume the lookup with the loaded data
+                lookup_result = continuation.resume(dwo);
+            }
+            LookupResult::Output(Ok(mut frames)) => {
+                println!("existing case");
+
+                while let Ok(Some(frame)) = frames.next() {
+                    if let Some(name) = frame.function {
+                        return name.demangle().ok().map(|s| s.to_string());
+                    }
+                }
+                return None;
+            }
+            LookupResult::Output(Err(e)) => {
+                println!("error case {}",e);
+
+                return None;
+            }
+        }
+    }
 }
+
+
 
 pub struct Instruction{
     pub detail:InstructionDetail,
-    pub file: Arc<PathBuf>
+    pub file: Arc<Path>
 }
 
 pub struct CodeFile {
@@ -134,7 +180,7 @@ impl CodeFile {
 #[derive(Default)]
 pub struct CodeRegistry {
     pub source_files :HashMap<PathBuf,CodeFile>,
-    pub visited : HashSet<PathBuf>,
+    pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
 }
 
@@ -145,7 +191,7 @@ impl CodeRegistry {
     }
 
     pub fn visit_source_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>>{
-        if !self.visited.insert(path.to_path_buf()) {
+        if !self.visited.insert(path.into()) {
             return Ok(());
         }
 
@@ -154,8 +200,8 @@ impl CodeRegistry {
         Ok(())
     }
 
-    pub fn visit_machine_file(&mut self,path : Arc<PathBuf>,asm:&mut AsmRegistry) -> Result<(),Box<dyn Error>> {
-        if !self.visited.insert(path.to_path_buf()) {
+    pub fn visit_machine_file(&mut self,path : Arc<Path>,asm:&mut AsmRegistry) -> Result<(),Box<dyn Error>> {
+        if !self.visited.insert(path.clone()) {
             return Ok(());
         }
 
@@ -216,7 +262,17 @@ impl<'a> DebugInstruction<'a> {
         self.resolve_function_name(self.ins.address)
     }
 
-    pub fn get_string_allways(&self) -> String {
+    pub fn get_string_load<'b:'a>(&self, registry: &mut AsmRegistry<'b>) -> String {
+        format!("{:#010x}: {:<6} {:<30} {}",
+            
+            self.ins.address, 
+            self.ins.mnemonic,
+            self.ins.op_str, //this needs a fixup
+            find_func_name(self.addr2line,registry,self.ins.address).unwrap_or("<unknown>".to_string()),
+        )
+    }
+
+    pub fn get_string_no_load(&self) -> String {
         format!("{:#010x}: {:<6} {:<30} {}",
             
             self.ins.address, 
