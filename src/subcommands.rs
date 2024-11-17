@@ -46,7 +46,7 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
     let _cleanup = TerminalCleanup;
     let mut state = State::new();
 
-    state.list_state.select(Some(0)); // Initialize the selected index
+    state.dir_list_state.select(Some(0)); // Initialize the selected index
 
     loop {
         match state.mode {

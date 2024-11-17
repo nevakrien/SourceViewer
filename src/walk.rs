@@ -33,7 +33,7 @@ pub enum Mode {
 pub struct State {
     pub current_dir: PathBuf,
     pub original_dir: PathBuf,
-    pub list_state: ListState,
+    pub dir_list_state: ListState,
     pub mode: Mode,
     pub file_content: Vec<Line>,
     pub file_scroll: usize,
@@ -54,7 +54,7 @@ impl State {
         Self {
             current_dir: PathBuf::from("."),
             original_dir: PathBuf::from("."),
-            list_state: ListState::default(),
+            dir_list_state: ListState::default(),
             mode: Mode::Dir,
             file_content: Vec::new(),
             file_scroll: 0,
@@ -123,7 +123,7 @@ pub fn render_directory(
             .highlight_style(Style::default().bg(Color::Blue).add_modifier(Modifier::BOLD))
             .highlight_symbol(">> ");
 
-        f.render_stateful_widget(list, layout[0], &mut state.list_state);
+        f.render_stateful_widget(list, layout[0], &mut state.dir_list_state);
     })?;
     Ok(())
 }
@@ -136,25 +136,25 @@ pub fn handle_directory_input(
         match code {
             KeyCode::Char('q') => return Ok(true),
             KeyCode::Down | KeyCode::Char('s') => {
-                let i = match state.list_state.selected() {
+                let i = match state.dir_list_state.selected() {
                     Some(i) => (i + 1) % entries.len(),
                     None => 0,
                 };
-                state.list_state.select(Some(i));
+                state.dir_list_state.select(Some(i));
             }
             KeyCode::Up | KeyCode::Char('w') => {
-                let i = match state.list_state.selected() {
+                let i = match state.dir_list_state.selected() {
                     Some(i) => if i == 0 { entries.len() - 1 } else { i - 1 },
                     None => 0,
                 };
-                state.list_state.select(Some(i));
+                state.dir_list_state.select(Some(i));
             }
             KeyCode::Enter => {
-                if let Some(i) = state.list_state.selected() {
+                if let Some(i) = state.dir_list_state.selected() {
                     let path = entries[i].path();
                     if path.is_dir() {
                         state.current_dir = path;
-                        state.list_state.select(Some(0));
+                        state.dir_list_state.select(Some(0));
                     } else if path.is_file() {
                         load_file(state,&path)?;
 
@@ -165,7 +165,7 @@ pub fn handle_directory_input(
                 if state.current_dir != state.original_dir {
                     if let Some(parent) = state.current_dir.parent() {
                         state.current_dir = parent.to_path_buf();
-                        state.list_state.select(Some(0));
+                        state.dir_list_state.select(Some(0));
                     }
                 }
             }
