@@ -17,6 +17,7 @@ use std::error::Error;
 
 #[derive(Clone,Debug,PartialEq)]
 pub struct MachineFile<'a> {
+    pub arch: object::Architecture,
     pub sections: Vec<Section<'a>>,
     // pub object: goblin::Object<'a>,
     // pub dwarf: gimli::read::Dwarf<EndianSlice<'a, RunTimeEndian>>,
@@ -166,8 +167,9 @@ impl<'a> MachineFile<'a> {
 
     pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
         let obj = object::File::parse(buffer)?;
+        let arch = obj.architecture();
         let endian = if obj.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
-        let mut cs = create_capstone(&obj)?;
+        let mut cs = create_capstone(&arch)?;
         cs.set_skipdata(true)?;
         let mut parsed_sections = Vec::new();
         let mut dw = DwarfSectionLoader::new(endian);
@@ -209,6 +211,7 @@ impl<'a> MachineFile<'a> {
 
         }
         Ok(MachineFile {
+            arch,
             sections: parsed_sections,
             // object: obj,
             dwarf_loader:dw,
@@ -217,8 +220,8 @@ impl<'a> MachineFile<'a> {
 
 }
 
-fn create_capstone(obj: &object::File) -> Result<Capstone, Box<dyn Error>> {
-    let cs = match obj.architecture() {
+fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Error>> {
+    let cs = match arch {
         object::Architecture::X86_64 => {
             Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(false).build()?
         }
