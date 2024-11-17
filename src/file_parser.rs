@@ -12,6 +12,7 @@ use gimli::{read::Dwarf, SectionId, EndianSlice};
 use std::error::Error;
 
 pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
+pub type FileMap = HashMap<Arc<Path>,LineMap>;
 
 #[derive(Debug)]
 pub struct  MachineFileInner<'a> {
@@ -24,7 +25,7 @@ pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
     pub sections: Vec<Section<'a>>,
     pub dwarf : Option<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>>,
-    pub file_lines: Option<Arc<HashMap<Arc<Path>,LineMap>>>, //line -> instruction>,
+    pub file_lines: Option<Arc<FileMap>>, //line -> instruction>,
 }
 
 #[derive(Clone,Debug,PartialEq)]
@@ -68,7 +69,7 @@ pub struct InstructionDetail {
 impl<'a> MachineFile<'a> {
     
 
-    pub fn get_lines_map(&mut self) -> Result<Arc<HashMap<Arc<Path>,LineMap>>, Box<dyn Error>> {
+    pub fn get_lines_map(&mut self) -> Result<Arc<FileMap>, Box<dyn Error>> {
         if let Some(ans) = &self.file_lines {
             return Ok(ans.clone())
         }

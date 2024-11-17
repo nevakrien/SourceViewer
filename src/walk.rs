@@ -332,7 +332,7 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
 pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
-    Ok(reader.lines().filter_map(Result::ok)
+    Ok(reader.lines().map_while(Result::ok)
         .enumerate()
         .map(|(i, s)|
             Line::new(s,i+1)
