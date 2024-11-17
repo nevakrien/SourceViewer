@@ -1,3 +1,9 @@
+use std::collections::hash_map;
+use std::collections::HashMap;
+use std::path::Path;
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use object::File;
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
 use object::{Object,SectionFlags,ObjectSection};
 
@@ -7,10 +13,20 @@ use capstone::prelude::*;
 use gimli::{read::Dwarf, SectionId, EndianSlice};
 use std::error::Error;
 
+pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
+
+#[derive(Debug)]
+pub struct  MachineFileInner<'a> {
+    pub obj: object::File<'a>,
+    pub sections: Vec<Section<'a>>,
+}
+
 #[derive(Debug)]
 pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
     pub sections: Vec<Section<'a>>,
+    pub dwarf : Option<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>>,
+    pub file_lines: Option<Arc<HashMap<Arc<Path>,LineMap>>>, //line -> instruction>,
 }
 
 #[derive(Clone,Debug,PartialEq)]
@@ -52,15 +68,64 @@ pub struct InstructionDetail {
 
 
 impl<'a> MachineFile<'a> {
+    
+
+    pub fn get_lines_map(&mut self) -> Result<Arc<HashMap<Arc<Path>,LineMap>>, Box<dyn Error>> {
+        if let Some(ans) = &self.file_lines {
+            return Ok(ans.clone())
+        }
+
+        let dwarf = self.load_dwarf()?;
+        let context = addr2line::Context::from_arc_dwarf(dwarf)?;
+
+        let mut ans = Arc::new(HashMap::new());
+        let handle = Arc::get_mut(&mut ans).unwrap();
+
+        for instruction in self.sections.iter()
+            .filter_map(|item| {
+                if let Section::Code(code_section) = item {
+                    Some(&code_section.instructions)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|instructions| instructions.iter())
+        {
+            if let Ok(Some(loc))= context.find_location(instruction.address){
+                if let (Some(file_name),Some(line)) = (loc.file,loc.line){
+                    let file = Path::new(file_name).into();
+                    
+                    handle.entry(file)
+                    .or_insert(BTreeMap::new())
+                    .entry(line)
+                    .or_insert(Vec::new())
+                    .push(instruction.clone());
+
+
+                }
+            }
+        }
+
+        self.file_lines = Some(ans.clone());
+        Ok(ans)
+    }
+
     pub fn get_gimli_section(&self, section: SectionId) -> &'a [u8] {
         self.obj.section_by_name(section.name()).map(|x| x.data().ok()).flatten().unwrap_or(&[])
     }
 
-    pub fn load_dwarf(&self) -> Result<Dwarf<EndianSlice<'a,RunTimeEndian>>, gimli::Error>{
+    pub fn load_dwarf(&mut self) -> Result<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>, gimli::Error>{
+        if let Some(dwarf) = &self.dwarf {
+            return Ok(dwarf.clone())
+        }
+
        let endian = if self.obj.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
-       Dwarf::load(|section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
+       let dwarf = Dwarf::load(|section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
             Ok(EndianSlice::new(self.get_gimli_section(section), endian))
-        })
+        });
+
+       self.dwarf = Some(dwarf?.into());
+       Ok(self.dwarf.clone().unwrap())
     }
 
     pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
@@ -102,11 +167,16 @@ impl<'a> MachineFile<'a> {
             }
 
         }
+
+
         Ok(MachineFile {
             obj,
             sections: parsed_sections,
+            dwarf:None,
+            file_lines: None
         })
     }
+
 
 }
 

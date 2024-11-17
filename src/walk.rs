@@ -452,7 +452,7 @@ pub fn render_file_asm_viewer(
             ));
 
         // if let Some(code_file) = code_file {
-            if let Some(instructions) = code_file.asm.get(&(state.cursor as u32)) {
+            if let Some(instructions) = code_file.get_asm(&(state.cursor as u32)) {
                 // Render instructions for the current line
                 let asm_items: Vec<ListItem> = instructions
                     .iter()

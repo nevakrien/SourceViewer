@@ -39,12 +39,12 @@ impl<'a> AsmRegistry<'a> {
 
 
 
-    pub fn get_machine(&mut self, path:Arc<Path>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
+    pub fn get_machine(&mut self, path:Arc<Path>) -> Result<&mut MachineFile<'a>,Box<dyn Error>>{
         //code looks so ugly because we cant pull into a side function or the borrow checker will freak out
         // println!("geting data for {}",path.to_string_lossy());
 
         match self.map.entry(path.clone()) {
-            hash_map::Entry::Occupied(entry) => entry.into_mut().as_ref().map_err(|e| e.clone().into()),
+            hash_map::Entry::Occupied(entry) => entry.into_mut().as_mut().map_err(|e| e.clone().into()),
             hash_map::Entry::Vacant(entry) => {
                 let buffer = match fs::read(&*path){
                     Ok(x) => x,
@@ -52,12 +52,12 @@ impl<'a> AsmRegistry<'a> {
                         Err(
                             WrapedError::new(Box::new(e))
                             ))
-                        .as_ref().map_err(|e| e.clone().into())}
+                        .as_mut().map_err(|e| e.clone().into())}
                 };
                 let b = self.files_arena.alloc(buffer);
                 entry.insert(MachineFile::parse(b)
                     .map_err(|e| WrapedError::new(e)))
-                    .as_ref().map_err(|e| e.clone().into())
+                    .as_mut().map_err(|e| e.clone().into())
             }
         }
         
@@ -69,12 +69,12 @@ impl<'a> AsmRegistry<'a> {
 pub type AddressFileMapping = HashMap<u64, (String, u32)>; // address -> (file, line)
 
 pub fn map_instructions_to_source(
-    machine_file: &MachineFile,
+    machine_file: &mut MachineFile,
 ) -> Result<AddressFileMapping,Box<dyn Error>> {
     let mut mapping = AddressFileMapping::new();
 
     // Create addr2line context from DWARF data
-    let ctx = Context::from_dwarf(machine_file.load_dwarf()?)?;
+    let ctx = Context::from_arc_dwarf(machine_file.load_dwarf()?)?;
 
     // Iterate through each code section and map addresses to source
     for section in &machine_file.sections {
@@ -129,7 +129,7 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
                 let dwo = dwo_path.and_then(|full_path| 
                     registry.get_machine(full_path.into()).ok()
                         .and_then(|m| m.load_dwarf().ok())
-                        .map(Arc::new)
+                        // .map(Arc::new)
                 );
 
 
@@ -157,7 +157,7 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
 
 
 
-#[derive(PartialEq)]
+#[derive(PartialEq,Clone)]
 pub struct Instruction{
     pub detail:InstructionDetail,
     pub file: Arc<Path>
@@ -166,7 +166,7 @@ pub struct Instruction{
 // #[derive(PartialEq)]
 pub struct CodeFile {
     pub text: String,
-    pub asm: BTreeMap<u32,Vec<Instruction>>, //line -> instruction
+    asm: BTreeMap<u32,Vec<Instruction>>, //line -> instruction
     pub errors: Vec<(StackedError,Option<Arc<Path>>)>
 }
 
@@ -179,6 +179,11 @@ impl CodeFile {
             errors: Vec::new(),
         }) 
     }
+
+    #[inline]
+    pub fn get_asm(&self,line:&u32) -> Option<&[Instruction]> {
+        self.asm.get(&line).map(|x| x.as_slice())//.unwrap_or(&[])
+    }
 }
 
 pub struct CodeRegistry<'a,'b> {
@@ -189,8 +194,8 @@ pub struct CodeRegistry<'a,'b> {
 }
 
 
-pub fn make_context<'a>(machine_file:&MachineFile<'a>) -> Result<Context<EndianSlice<'a,RunTimeEndian>>,Box<dyn Error>> {
-    Ok(Context::from_dwarf(machine_file.load_dwarf()?)?)
+pub fn make_context<'a>(machine_file:&mut MachineFile<'a>) -> Result<Context<EndianSlice<'a,RunTimeEndian>>,Box<dyn Error>> {
+    Ok(Context::from_arc_dwarf(machine_file.load_dwarf()?)?)
 }
 
 impl<'a,'b> CodeRegistry<'a,'b> {
@@ -200,8 +205,6 @@ impl<'a,'b> CodeRegistry<'a,'b> {
             source_files : HashMap::new(),
         }
     }
-
-
 
     pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&mut CodeFile,Box<dyn Error>>{
         match self.source_files.entry(path.clone()) {
@@ -217,7 +220,7 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                };
 
 
-                for res in self.asm.map.values() {
+                for res in self.asm.map.values_mut() {
                     let machine_file = match res {
                         Ok(x) => x,
                         Err(e) => {
@@ -226,58 +229,34 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                             continue;
                         }
                     };
-                    let ctx = match make_context(machine_file) {
+                    let map = match machine_file.get_lines_map() {
                         Ok(x) =>x,
                         Err(e) => {
-                            let error = StackedError::new(e,"while getting machine");
+                            let error = StackedError::new(e,"while making context");
                             code_file.errors.push((error,None));
                             continue;
                             
                         }
                     };
 
-                    for section in &machine_file.sections {
-                        match section {
-                            Section::Code(code_section) => {
-                                for instruction in &code_section.instructions {
+                    if let Some(line_map) = map.get(&path){
+                        for (k,v) in line_map {
+                            let spot = code_file.asm
+                            .entry(*k)
+                            .or_insert(vec![]);
 
-                                    match ctx.find_location(instruction.address) {
-                                        Err(e) => {
-                                            let error = StackedError::new(Box::new(e),"while getting machine");
-                                            code_file.errors.push((error,None));                                        
-                                        }   
-                                        Ok(None)=> {},
-                                        Ok(Some(loc)) => 
-                                    
-
-                                        if let (Some(file_name),Some(line)) = (loc.file,loc.line){
-                                            // let file = match fs::canonicalize(Path::new(file_name)) {
-                                            //     Ok(file) =>file,
-                                            //     Err(_) => {
-                                            //         continue;
-                                            //     },
-                                            // };
-
-                                            let file = Path::new(file_name);
-
-                                            if *file!=*path {
-                                                continue;
-                                            }
-                                            let x = Instruction {
-                                                detail: instruction.clone(),
-                                                file: path.clone()
-                                            };
-
-                                            code_file.asm.entry(line).or_default().push(x);
-
-                                        }
-
-                                    }
-                                }  
-                            },
-                            Section::Info(_) =>{}
+                            spot.reserve(v.len());
+                            spot.extend(v.iter()
+                            .map(|detail| 
+                                Instruction{
+                                    detail: detail.clone(),
+                                    file: path.clone()
+                                }
+                                )
+                            )
                         }
                     }
+
                     
                 }
 
@@ -287,7 +266,92 @@ impl<'a,'b> CodeRegistry<'a,'b> {
         }
     }
 
-    pub fn visit_machine_file(&mut self,path : Arc<Path>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
+
+    // pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&mut CodeFile,Box<dyn Error>>{
+    //     match self.source_files.entry(path.clone()) {
+    //         hash_map::Entry::Occupied(entry)=> entry.into_mut().as_mut().map_err(|e| e.clone().into()),
+    //         hash_map::Entry::Vacant(entry) => {
+    //             let code_file = entry.insert(CodeFile::read(&path)
+    //                 .map_err(|e| Box::new(WrapedError::new(e)))
+    //             );
+
+    //            let code_file = match code_file {
+    //                 Ok(x) => x,
+    //                 Err(e) => {return Err((*e).clone().into());}
+    //            };
+
+
+    //             for res in self.asm.map.values_mut() {
+    //                 let machine_file = match res {
+    //                     Ok(x) => x,
+    //                     Err(e) => {
+    //                         let error = StackedError::from_wraped(e.clone(),"while getting machine");
+    //                         code_file.errors.push((error,None));
+    //                         continue;
+    //                     }
+    //                 };
+    //                 let ctx = match make_context(machine_file) {
+    //                     Ok(x) =>x,
+    //                     Err(e) => {
+    //                         let error = StackedError::new(e,"while making context");
+    //                         code_file.errors.push((error,None));
+    //                         continue;
+                            
+    //                     }
+    //                 };
+
+    //                 for section in &machine_file.sections {
+    //                     match section {
+    //                         Section::Code(code_section) => {
+    //                             for instruction in &code_section.instructions {
+
+    //                                 match ctx.find_location(instruction.address) {
+    //                                     Err(e) => {
+    //                                         let error = StackedError::new(Box::new(e),"while reading instruction");
+    //                                         code_file.errors.push((error,None));                                        
+    //                                     }   
+    //                                     Ok(None)=> {},
+    //                                     Ok(Some(loc)) => 
+                                    
+
+    //                                     if let (Some(file_name),Some(line)) = (loc.file,loc.line){
+    //                                         // let file = match fs::canonicalize(Path::new(file_name)) {
+    //                                         //     Ok(file) =>file,
+    //                                         //     Err(_) => {
+    //                                         //         continue;
+    //                                         //     },
+    //                                         // };
+
+    //                                         let file = Path::new(file_name);
+
+    //                                         if *file!=*path {
+    //                                             continue;
+    //                                         }
+    //                                         // let x = Instruction {
+    //                                         //     detail: instruction.clone(),
+    //                                         //     file: path.clone()
+    //                                         // };
+
+    //                                         code_file.asm.entry(line).or_default().push(instruction.clone());
+
+    //                                     }
+
+    //                                 }
+    //                             }  
+    //                         },
+    //                         Section::Info(_) =>{}
+    //                     }
+    //                 }
+                    
+    //             }
+
+                
+    //             Ok(code_file)
+    //         }
+    //     }
+    // }
+
+    pub fn visit_machine_file(&mut self,path : Arc<Path>) -> Result<&mut MachineFile<'a>,Box<dyn Error>>{
         self.asm.get_machine(path)
     }
 }

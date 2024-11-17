@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeRegistry;
 use crate::walk::render_file_asm_viewer;
-use crate::walk::render_file_viewer;
 use crate::walk::handle_file_input;
 use crate::walk::create_terminal;
 use crate::walk::TerminalCleanup;
@@ -41,7 +40,8 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
     for f in file_paths {
         let file :Arc<Path>= f.into();
         println!("visiting file {:?}",&*file);
-        code_files.visit_machine_file(file)?;
+        code_files.visit_machine_file(file)?
+        .get_lines_map()?;
     }
 
     let mut terminal = create_terminal()?;
@@ -91,9 +91,9 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let machine_file = registry.get_machine(file_path.into())?;
-        let ctx = addr2line::Context::from_dwarf(machine_file.load_dwarf()?)?;
+        let ctx = addr2line::Context::from_arc_dwarf(machine_file.load_dwarf()?)?;
 
-        let source_map = map_instructions_to_source(&machine_file)?;
+        let source_map = map_instructions_to_source(machine_file)?;
 
         for section in &machine_file.sections.clone() {
             if let Section::Code(code_section) = section {
@@ -184,9 +184,9 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer)?;
+        let mut machine_file = MachineFile::parse(&buffer)?;
         let debug = machine_file.load_dwarf().ok().and_then(|dwarf_data| {
-            addr2line::Context::from_dwarf(dwarf_data).ok()
+            addr2line::Context::from_arc_dwarf(dwarf_data).ok()
         });
 
         
@@ -251,9 +251,9 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         // registry.add_file(file_path.clone())?;
 
         let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer)?;
+        let mut machine_file = MachineFile::parse(&buffer)?;
 
-        let map = map_instructions_to_source(&machine_file)?;
+        let map = map_instructions_to_source(&mut machine_file)?;
         for (s,_) in map.values() {
             source_files.insert(s.to_string());
         }
