@@ -67,8 +67,6 @@ pub struct InstructionDetail {
 
 
 impl<'a> MachineFile<'a> {
-    
-
     pub fn get_lines_map(&mut self) -> Result<Arc<FileMap>, Box<dyn Error>> {
         if let Some(ans) = &self.file_lines {
             return Ok(ans.clone())
