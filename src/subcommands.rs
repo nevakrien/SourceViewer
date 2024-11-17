@@ -27,22 +27,20 @@ use std::error::Error;
 use crate::program_context::map_instructions_to_source;
 
 pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("FILES")
-        .expect("FILES argument is required") 
-        .cloned()
-        .collect();
+    let file_path: PathBuf = matches
+    .get_one::<PathBuf>("FILE") // Use `get_one` instead of `get_many`
+    .expect("FILE argument is required")
+    .into(); // No need for `collect`, just convert directly to `PathBuf`
+    let obj_file :Arc<Path>= file_path.into();
 
     let arena = Arena::new();
     let mut registry = AsmRegistry::new(&arena);
     let mut code_files = CodeRegistry::new(&mut registry);
+    
+    println!("visiting file {:?}",&*obj_file);
+    code_files.visit_machine_file(obj_file.clone())?
+    .get_lines_map()?;
 
-    for f in file_paths {
-        let file :Arc<Path>= f.into();
-        println!("visiting file {:?}",&*file);
-        code_files.visit_machine_file(file)?
-        .get_lines_map()?;
-    }
 
     let mut terminal = create_terminal()?;
     let _cleanup = TerminalCleanup;
@@ -65,7 +63,7 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
                 let path =  fs::canonicalize(Path::new(&state.file_path))?.into();
                 let file = code_files.get_source_file(path)?;
 
-                render_file_asm_viewer(&mut terminal, &mut state,file)?;
+                render_file_asm_viewer(&mut terminal, &mut state,file,obj_file.clone())?;
                 if handle_file_input(&mut state)? {
                     break;
                 }

@@ -1,5 +1,6 @@
+use std::sync::Arc;
+use std::path::Path;
 use crate::program_context::CodeFile;
-use crate::program_context::resolve_func_name;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
@@ -389,6 +390,7 @@ pub fn render_file_asm_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut State,
     code_file: &CodeFile, // Use Option for CodeFile reference
+    obj_path: Arc<Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
         let size = f.size();
@@ -452,7 +454,7 @@ pub fn render_file_asm_viewer(
             ));
 
         // if let Some(code_file) = code_file {
-            if let Some(instructions) = code_file.get_asm(&(state.cursor as u32)) {
+            if let Some(instructions) = code_file.get_asm(&(state.cursor as u32),obj_path) {
                 // Render instructions for the current line
                 let asm_items: Vec<ListItem> = instructions
                     .iter()
@@ -460,9 +462,9 @@ pub fn render_file_asm_viewer(
 
                         let formatted_instruction = format!(
                             "{:#010x}: {:<6} {:<30}",
-                            instruction.detail.address,
-                            instruction.detail.mnemonic,
-                            instruction.detail.op_str,
+                            instruction.address,
+                            instruction.mnemonic,
+                            instruction.op_str,
                         );
 
                         ListItem::new(vec![Spans::from(formatted_instruction)])

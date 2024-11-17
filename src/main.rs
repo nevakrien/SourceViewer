@@ -38,10 +38,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             Command::new("walk")
                 .about("looks at the source code files next to assembly")
                 .arg(
-                    Arg::new("FILES")
-                        .help("Input binary/object files to process")
-                        // .required(true)
-                        .num_args(1..) // Allows multiple file paths
+                    Arg::new("FILE") // Renamed to singular "FILE" for clarity
+                        .help("Input binary/object file to process")
+                        .required(true) // Ensure it is required
+                        .num_args(1) // Expect exactly one argument
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
         )

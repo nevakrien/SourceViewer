@@ -157,16 +157,16 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
 
 
 
-#[derive(PartialEq,Clone)]
-pub struct Instruction{
-    pub detail:InstructionDetail,
-    pub file: Arc<Path>
-}
+// #[derive(PartialEq,Clone)]
+// pub struct Instruction{
+//     pub detail:InstructionDetail,
+//     pub file: Arc<Path>
+// }
 
 // #[derive(PartialEq)]
 pub struct CodeFile {
     pub text: String,
-    asm: BTreeMap<u32,Vec<Instruction>>, //line -> instruction
+    asm: BTreeMap<u32,HashMap<Arc<Path>,Vec<InstructionDetail>>>, //line -> instruction
     pub errors: Vec<(StackedError,Option<Arc<Path>>)>
 }
 
@@ -181,8 +181,8 @@ impl CodeFile {
     }
 
     #[inline]
-    pub fn get_asm(&self,line:&u32) -> Option<&[Instruction]> {
-        self.asm.get(&line).map(|x| x.as_slice())//.unwrap_or(&[])
+    pub fn get_asm(&self,line:&u32,path:Arc<Path>) -> Option<&[InstructionDetail]> {
+        self.asm.get(&line)?.get(&path).map(|x| x.as_slice())//.unwrap_or(&[])
     }
 }
 
@@ -219,8 +219,7 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                     Err(e) => {return Err((*e).clone().into());}
                };
 
-
-                for res in self.asm.map.values_mut() {
+                for (obj_path,res) in self.asm.map.iter_mut() {
                     let machine_file = match res {
                         Ok(x) => x,
                         Err(e) => {
@@ -240,20 +239,15 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                     };
 
                     if let Some(line_map) = map.get(&path){
-                        for (k,v) in line_map {
+                        for (line,v) in line_map {
                             let spot = code_file.asm
-                            .entry(*k)
+                            .entry(*line)
+                            .or_insert(HashMap::new())
+                            .entry(obj_path.clone())
                             .or_insert(vec![]);
 
                             spot.reserve(v.len());
-                            spot.extend(v.iter()
-                            .map(|detail| 
-                                Instruction{
-                                    detail: detail.clone(),
-                                    file: path.clone()
-                                }
-                                )
-                            )
+                            spot.extend_from_slice(v)
                         }
                     }
 
