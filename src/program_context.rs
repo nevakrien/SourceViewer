@@ -156,11 +156,13 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
 
 
 
+#[derive(PartialEq)]
 pub struct Instruction{
     pub detail:InstructionDetail,
     pub file: Arc<Path>
 }
 
+#[derive(PartialEq)]
 pub struct CodeFile {
     pub text: String,
     pub asm: BTreeMap<u32,Vec<Instruction>> //line -> instruction
@@ -235,10 +237,11 @@ impl CodeRegistry {
                         }
                     }
                 },
-                _ => todo!(),
+                _ => {},
             }
         } ;
-        todo!()
+        // todo!()
+        Ok(())
 
     }
 }

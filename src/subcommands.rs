@@ -1,4 +1,17 @@
 
+use std::path::Path;
+use crate::program_context::CodeRegistry;
+use crate::walk::render_file_asm_viewer;
+use crate::walk::render_file_viewer;
+use crate::walk::handle_file_input;
+use crate::walk::create_terminal;
+use crate::walk::TerminalCleanup;
+use crate::walk::State;
+use crate::walk::render_directory;
+use crate::walk::handle_directory_input;
+use crate::walk::Mode;
+
+
 use crate::program_context::AsmRegistry;
 use typed_arena::Arena;
 use crate::program_context::resolve_func_name;
@@ -12,6 +25,60 @@ use crate::file_parser::{Section};
 use std::path::PathBuf;
 use std::error::Error;
 use crate::program_context::map_instructions_to_source;
+
+pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    let file_paths: Vec<PathBuf> = matches
+        .get_many::<PathBuf>("FILES")
+        .expect("FILES argument is required") 
+        .cloned()
+        .collect();
+
+    let arena = Arena::new();
+    let mut registry = AsmRegistry::new(&arena);
+    let mut code_files = CodeRegistry::new();
+
+    for f in file_paths {
+        code_files.visit_machine_file(f.into(),&mut registry)?;
+    }
+
+    let mut terminal = create_terminal()?;
+    let _cleanup = TerminalCleanup;
+    let mut state = State::new();
+
+    state.list_state.select(Some(0)); // Initialize the selected index
+
+    loop {
+        match state.mode {
+            Mode::Dir => {
+                let entries: Vec<_> = fs::read_dir(&state.current_dir)?
+                    .filter_map(Result::ok)
+                    .collect();
+                render_directory(&mut terminal, &entries, &mut state)?;
+                if handle_directory_input(&entries, &mut state)? {
+                    break;
+                }
+            }
+            Mode::File => {
+                let path =  fs::canonicalize(Path::new(&state.file_path))?;
+                code_files.visit_source_file(&path)?;
+                let file = code_files.source_files.get(&path);
+
+                // if file.is_none() {
+                //     println!("{:?}",code_files.source_files.keys());
+                //     return Err("no source file".into())
+                // }
+
+                render_file_asm_viewer(&mut terminal, &mut state,file)?;
+                if handle_file_input(&mut state)? {
+                    break;
+                }
+            }
+        };
+    }
+
+    Ok(())
+}
+
 
 pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `lines` command

@@ -1,3 +1,5 @@
+use crate::program_context::CodeFile;
+use crate::program_context::resolve_func_name;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
@@ -337,3 +339,153 @@ pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
 
         .collect())
 }
+
+// Helper function to create a line with a line number and styling
+fn asm_create_line_with_number(line: &Line,_cursor_pos:usize) -> Spans {
+    let line_number_span = Span::styled(
+        format!("{:<4}", line.line_number),
+        Style::default().fg(Color::Blue),
+    );
+
+    // let c = if cursor_pos+ 1 == line.line_number{
+    //         ">>"
+    //     } else {
+    //         "  "
+    //     };
+
+    // let cursor_span = Span::styled(
+        
+    //     format!("{} ", c),
+    //     Style::default().fg(Color::White),
+    // );
+
+    let line_style = if line.is_selected {
+        // Style::default().fg(Color::Red)
+        Style::default()
+
+    } else {
+        Style::default()
+    };
+
+    let line_content_span = Span::styled(line.content.clone(), line_style);
+    Spans::from(vec![line_number_span, line_content_span])
+}
+
+// Helper function to create a line without a line number and styling
+fn asm_create_line_without_number(line: &Line,_cursor:usize) -> Spans {
+    let line_style = if line.is_selected {
+        // Style::default().fg(Color::Red)
+        Style::default()
+
+    } else {
+        Style::default()
+    };
+
+    let line_content_span = Span::styled(line.content.clone(), line_style);
+    Spans::from(vec![line_content_span])
+}
+
+pub fn render_file_asm_viewer(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    state: &mut State,
+    code_file: Option<&CodeFile>, // Use Option for CodeFile reference
+) -> Result<(), Box<dyn std::error::Error>> {
+    terminal.draw(|f| {
+        let size = f.size();
+        let max_visible_lines = size.height.saturating_sub(4) as usize;
+
+        // Adjust `file_scroll` to keep `cursor` within the visible range
+        if state.cursor < state.file_scroll {
+            state.file_scroll = state.cursor;
+        } else if state.cursor >= state.file_scroll + max_visible_lines {
+            state.file_scroll = state.cursor - max_visible_lines + 1;
+        }
+
+        // Layout: Split vertically for source and assembly (if selected)
+        let layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
+            .split(size);
+
+        // Source file block
+        let file_block = Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(
+                format!("File Viewer - {}", state.file_path),
+                Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            ));
+
+        let source_items: Vec<ListItem> = state
+            .file_content
+            .iter()
+            .skip(state.file_scroll)
+            .take(max_visible_lines)
+            .enumerate()
+            .map(|(i, line)| {
+                let line_index = state.file_scroll + i;
+
+                if line_index == state.cursor {
+                    // Highlighted line with assembly view if available
+                    ListItem::new(vec![asm_create_line_with_number(line, line_index)])
+                        .style(Style::default().bg(Color::DarkGray))
+                } else {
+                    ListItem::new(vec![asm_create_line_without_number(line, line_index)])
+                }
+            })
+            .collect();
+
+        let mut list_state = ListState::default();
+        list_state.select(Some(state.cursor - state.file_scroll));
+
+        let list = List::new(source_items)
+            .block(file_block)
+            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
+
+        f.render_stateful_widget(list, layout[0], &mut list_state);
+
+        // Assembly view block
+        let asm_block = Block::default()
+            .borders(Borders::ALL)
+            .title(Span::styled(
+                "Assembly View",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ));
+
+        if let Some(code_file) = code_file {
+            if let Some(instructions) = code_file.asm.get(&(state.cursor as u32)) {
+                // Render instructions for the current line
+                let asm_items: Vec<ListItem> = instructions
+                    .iter()
+                    .map(|instruction| {
+
+                        let formatted_instruction = format!(
+                            "{:#010x}: {:<6} {:<30}",
+                            instruction.detail.address,
+                            instruction.detail.mnemonic,
+                            instruction.detail.op_str,
+                        );
+
+                        ListItem::new(vec![Spans::from(formatted_instruction)])
+                            .style(Style::default().fg(Color::Cyan))
+                    })
+                    .collect();
+
+                let asm_list = List::new(asm_items).block(asm_block);
+                f.render_widget(asm_list, layout[1]);
+            } else {
+                // Display a message if there are no instructions for the selected line
+                let error_msg = vec![ListItem::new(Spans::from("No assembly instructions for this line."))];
+                let error_list = List::new(error_msg).block(asm_block);
+                f.render_widget(error_list, layout[1]);
+            }
+        } else {
+           // Display an error message if `code_file` is None
+            let error_msg = vec![ListItem::new(Spans::from("Error: Assembly data is unavailable."))];
+            let error_list = List::new(error_msg).block(asm_block);
+            f.render_widget(error_list, layout[1]);
+
+        }
+    })?;
+    Ok(())
+}
+
