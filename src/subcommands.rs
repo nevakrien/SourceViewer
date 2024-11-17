@@ -1,4 +1,5 @@
 
+use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeRegistry;
 use crate::walk::render_file_asm_viewer;
@@ -38,7 +39,9 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
     let mut code_files = CodeRegistry::new();
 
     for f in file_paths {
-        code_files.visit_machine_file(f.into(),&mut registry)?;
+        let file :Arc<Path>= f.into();
+        println!("visiting file {:?}",&*file);
+        code_files.visit_machine_file(file,&mut registry)?;
     }
 
     let mut terminal = create_terminal()?;

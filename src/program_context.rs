@@ -1,3 +1,4 @@
+use colored::Colorize;
 use crate::errors::WrappedError;
 use addr2line::LookupContinuation;
 use addr2line::LookupResult;
@@ -180,7 +181,7 @@ impl CodeFile {
 
 #[derive(Default)]
 pub struct CodeRegistry {
-    pub source_files :HashMap<PathBuf,CodeFile>,
+    pub source_files :HashMap<Arc<Path>,CodeFile>,
     pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
 }
@@ -197,14 +198,27 @@ impl CodeRegistry {
     }
 
     pub fn visit_source_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>>{
-        if !self.visited.insert(path.into()) {
-            return Ok(());
-        }
+        self._visit_source_file(path.into())
+    }
 
-        let f = CodeFile::read(path)?;
-        self.source_files.insert(path.to_path_buf(),f);
+    // pub fn _visit_source_file(&mut self,path : Arc<Path>) -> Result<(),Box<dyn Error>>{
+    //     if !self.visited.insert(path.clone()) {
+    //         return Ok(());
+    //     }
+
+    //     let f = CodeFile::read(&path)?;
+    //     self.source_files.insert(path,f);
+    //     Ok(())
+    // }
+    pub fn _visit_source_file(&mut self, path: Arc<Path>) -> Result<(), Box<dyn Error>> {
+        // Attempt to insert a new entry if the path is not already present
+        if let std::collections::hash_map::Entry::Vacant(e) = self.source_files.entry(path.clone()) {
+            let f = CodeFile::read(&path)?;
+            e.insert(f); // Insert the file into the map
+        }
         Ok(())
     }
+
 
     pub fn visit_machine_file(&mut self,path : Arc<Path>,asm:&mut AsmRegistry) -> Result<(),Box<dyn Error>> {
         if !self.visited.insert(path.clone()) {
@@ -212,8 +226,8 @@ impl CodeRegistry {
         }
 
         //read and parse the file
-        let machine_file = asm.get_machine(path.clone())?;
-        let ctx = Context::from_dwarf(machine_file.load_dwarf()?)?;
+        let machine_file = asm.get_machine(path.clone()).map_err(|_e| "failed loading machine file")?;
+        let ctx = Context::from_dwarf(machine_file.load_dwarf().map_err(|_e| "failed load dwarf")?).map_err(|_e| "failed making ctx")?;
 
 
         for section in &machine_file.sections {
@@ -222,13 +236,36 @@ impl CodeRegistry {
                     for instruction in &code_section.instructions {
                         
                         //ignore missing but not invalid
-                        if let Some(loc) = ctx.find_location(instruction.address)?{
-                            if let (Some(file),Some(line)) = (loc.file,loc.line){
+                        if let Some(loc) = ctx.find_location(instruction.address).map_err(|_e| "failed finding location")?{
+                            if let (Some(file_name),Some(line)) = (loc.file,loc.line){
                                 
-                                //get the source file
-                                let file = Path::new(file);
-                                self.visit_source_file(file)?;
-                                let file = self.source_files.get_mut(file).unwrap();
+                                //TODO: this needs fixing!!!!
+                                let file :Arc<Path>= match fs::canonicalize(Path::new(file_name)) {
+                                    Ok(file) =>file.into(),
+                                    Err(_) => {
+                                        println!("{}",format!("{:?} does not exist",file_name ).red());
+                                        continue;
+                                    },
+                                };
+                                if self._visit_source_file(file.clone()).is_err( ){
+                                    println!("{}", format!("failed finding related source file {}",file.to_string_lossy()).red());
+                                    continue;
+                                } else {
+                                    println!("loaded {}",file.to_string_lossy());
+
+                                }
+
+                                // let file = match self.source_files.get_mut(&file) {
+                                //     Some(file) => file,
+                                //     None => {
+                                //         //not sure how this can even triger
+                                //         println!("error happened with {}",file.to_string_lossy());
+                                //         continue;
+                                //     }
+                                // };
+
+                                // self._visit_source_file(file.clone()).map_err(|_e| format!("failed finding related source files {}",file.to_string_lossy()))?;
+                                let file = self.source_files.get_mut(&file).unwrap();
 
                                 //insert
                                 let x = Instruction {

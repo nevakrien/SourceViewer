@@ -5,7 +5,16 @@ the goal is to allow viewing dissasmblies from the perspective of the source fil
 
 # TODO 
 1. symbol resolution: find the jump instructions and switch pointers with the names of the target
-2. interactive view
+2. solve path canonization on the walk command
+3. interactive view
+
+# Tests
+a very good test case is runing 
+```bash
+cargo run walk target/debug/SourceViewer
+```
+
+is a very good way to see where we are at.
 
 # Issues
 currently we cant run detail=true because that removes some instructions from the end...
