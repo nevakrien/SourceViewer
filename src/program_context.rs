@@ -1,6 +1,4 @@
 use crate::errors::WrappedError;
-use std::rc::Rc;
-use std::fmt;
 use addr2line::LookupContinuation;
 use addr2line::LookupResult;
 use gimli::EndianSlice;
@@ -42,7 +40,7 @@ impl<'a> AsmRegistry<'a> {
 
     pub fn get_machine(&mut self, path:Arc<Path>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
         //code looks so ugly because we cant pull into a side function or the borrow checker will freak out
-        println!("geting data for {}",path.to_string_lossy());
+        // println!("geting data for {}",path.to_string_lossy());
 
         match self.map.entry(path.clone()) {
             hash_map::Entry::Occupied(entry) => entry.into_mut().as_ref().map_err(|e| e.clone().into()),
@@ -115,6 +113,7 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
         match lookup_result {
             LookupResult::Load { load, continuation } => {
                 
+                // println!("load case {:?} {:?}",load.parent,load.path);
 
                 // Construct the full path for the DWO file if possible
                let dwo_path = load.comp_dir.as_ref()
@@ -123,7 +122,7 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
                     .map(|path| comp_dir_path.join(std::path::Path::new(&path.to_string_lossy().to_string())))
                 );
 
-                println!("load case {:?}",dwo_path);
+                // println!("load case {:?}",dwo_path);
 
                 
                 let dwo = dwo_path.and_then(|full_path| 
@@ -137,7 +136,7 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
                 lookup_result = continuation.resume(dwo);
             }
             LookupResult::Output(Ok(mut frames)) => {
-                println!("existing case");
+                // println!("existing case");
 
                 while let Ok(Some(frame)) = frames.next() {
                     if let Some(name) = frame.function {
@@ -147,7 +146,7 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
                 return None;
             }
             LookupResult::Output(Err(e)) => {
-                println!("error case {}",e);
+                // println!("error case {}",e);
 
                 return None;
             }

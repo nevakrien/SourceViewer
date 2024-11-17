@@ -73,7 +73,9 @@ pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Erro
         // let dwarf = machine_file.load_dwarf()?;
         // println!("{:#?}",dwarf );
         for (id,v) in machine_file.dwarf_loader.sections {
-            println!("{:?}:\n{}",id,String::from_utf8_lossy(v) );
+            println!("{}:\n{}",
+                format!("{:?}",id).blue(),
+                String::from_utf8_lossy(v) );
         }
     }
     println!("{}", message);
@@ -105,7 +107,7 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
                 Section::Code(code_section) => {
                     println!(
                         "Code Section: {} ({} instructions)",
-                        code_section.name,
+                        code_section.name.blue(),
                         code_section.instructions.len()
                     );
 
@@ -123,12 +125,14 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
                             ,func_name.as_deref().unwrap_or(""))
                     }
                 }
-                Section::Info(non_exec_section) => {
+                Section::Info(non_exec) => {
                     println!(
                         "Non-Executable Section: {} ({} bytes)",
-                        non_exec_section.name,
-                        non_exec_section.data.len()
+                        non_exec.name.blue(),
+                        non_exec.data.len()
                     );
+
+                    // println!("{}", String::from_utf8_lossy(non_exec.data) );
                 }
             }
         }

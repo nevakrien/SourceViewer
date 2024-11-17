@@ -1,13 +1,16 @@
-use goblin::pe;
+use object::pe::IMAGE_SCN_MEM_EXECUTE;
+use object::ObjectSection;
+use object::Object;
+// use goblin::pe;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use goblin::mach;
-use goblin::mach::Mach;
-use goblin::elf;
+// use goblin::mach;
+// use goblin::mach::Mach;
+// use goblin::elf;
 use gimli::RunTimeEndian;
 use capstone::arch::{arm, arm64, x86};
 use capstone::prelude::*;
-use goblin::Object;
+// use goblin::Object;
 use gimli::{read::Dwarf, SectionId, EndianSlice};
 use std::{fmt};
 use std::error::Error;
@@ -96,7 +99,7 @@ impl<'a> DwarfSectionLoader<'a> {
     
 
     // Method to add a section if it matches one of the DWARF sections
-    fn maybe_add_section(&mut self, section_name: &str, data: &'a [u8]) -> Result<(),DuplicateEntry>{
+    fn maybe_add_section(&mut self, section_name: &str, data: &'a [u8]) -> Result<bool,DuplicateEntry>{
         let section_id = match section_name {
             ".debug_line" => Some(SectionId::DebugLine),
             ".debug_info" => Some(SectionId::DebugInfo),
@@ -120,19 +123,25 @@ impl<'a> DwarfSectionLoader<'a> {
             ".debug_frame" => Some(SectionId::DebugFrame),
             ".eh_frame" => Some(SectionId::EhFrame),
             ".eh_frame_hdr" => Some(SectionId::EhFrameHdr),
-            _ => None,
+
+            //mising cases
+            ".debug_names"| ".debug_sup" | ".debug_str_sup" => todo!(),
+            ".gdb_index" | ".debug_gnu_pubnames" | ".debug_gnu_pubtypes" => todo!(),
+
+
+            name => if name.starts_with(".zdebug_") {todo!()} else {None},
         };
 
         if let Some(id) = section_id {
             match self.sections.entry(id) {
                 Entry::Vacant(entry) => {
                     entry.insert(data);
-                    Ok(())
+                    Ok(true)
                 }
                 Entry::Occupied(_) => Err(DuplicateEntry),
             }
         } else {
-            Ok(())
+            Ok(false)
         }
     }
 
@@ -153,35 +162,21 @@ impl<'a> MachineFile<'a> {
     pub fn load_dwarf(&self) -> Result<Dwarf<EndianSlice<'a,RunTimeEndian>>, gimli::Error>{
         self.dwarf_loader.load_dwarf()
     }
-    pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>> {
-        // Parse goblin object
-        let obj = Object::parse(buffer)?;
 
-        match &obj {
-            Object::Elf(elf) => {Self::parse_elf(elf,buffer)},
-            Object::Mach(mach) => {Self::parse_mach(mach,buffer)},
-            Object::PE(pe) => Self::parse_pe(pe, buffer),
-            _ => Err("Unsupported file format".into()),
-        }
-    }
-
-    pub fn parse_elf(elf:&elf::Elf,buffer: &'a[u8]) -> Result<MachineFile<'a>, Box<dyn Error>> {
-        // Determine the endianness dynamically
-        let endian = if elf.little_endian { RunTimeEndian::Little } else { RunTimeEndian::Big };
-
-        // Create Capstone instance dynamically
-        let cs = create_capstone_elf(elf)?;
+    pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
+        let obj = object::File::parse(buffer)?;
+        let endian = if obj.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
+        let cs = create_capstone(&obj)?;
         let mut parsed_sections = Vec::new();
         let mut dw = DwarfSectionLoader::new(endian);
+        
+        for section in obj.sections() {
+            let section_name :Box<str>= section.name()?.into();
+            let section_data = section.data()?;
 
-        // Process sections in the order they come in the ELF file
-        for section in &elf.section_headers {
-            let section_name = elf.shdr_strtab.get_at(section.sh_name).unwrap_or("unknown").to_string().into_boxed_str();
-            let section_data = &buffer[section.sh_offset as usize..(section.sh_offset + section.sh_size) as usize];
-
-            if section.is_executable() {
+            if should_disassemble(&section) {
                 // Disassemble executable sections
-                let disasm = cs.disasm_all(section_data, section.sh_addr)?;
+                let disasm = cs.disasm_all(section_data, section.address())?;
                 let mut instructions = Vec::new();
                 for insn in disasm.iter() {
                     let detail =  cs.insn_detail(insn)?;
@@ -207,10 +202,8 @@ impl<'a> MachineFile<'a> {
                     data: section_data,
                 }));
             }
+
         }
-
-        // let dwarf = dw.load_dwarf()?;
-
         Ok(MachineFile {
             sections: parsed_sections,
             // object: obj,
@@ -218,222 +211,76 @@ impl<'a> MachineFile<'a> {
         })
     }
 
-    pub fn parse_mach(mach: &Mach<'_>, buffer: &'a [u8]) -> Result<MachineFile<'a>, Box<dyn Error>> {
-        // Determine endianness (Mach-O defaults to little-endian on macOS)
-        let endian = RunTimeEndian::Little;
-
-        let cs = create_capstone_mach(mach)?;
-        let mut parsed_sections = Vec::new();
-        let mut dw = DwarfSectionLoader::new(endian);
-
-        // Iterate over Mach-O segments and sections
-        if let Mach::Binary(mach_bin) = mach {
-            for segment in &mach_bin.segments {
-                for (section, _section_data) in segment.sections()? {
-                    let section_name = section.name().unwrap_or("unknown").to_string().into_boxed_str();
-                    let section_data = &buffer[section.offset as usize..(section.offset as u64 + section.size) as usize];
-
-                    // Check if the section is executable based on Mach-O flags
-                    if section.flags & mach::constants::SECTION_TYPE == mach::constants::S_REGULAR &&
-                       section.flags & mach::constants::S_ATTR_PURE_INSTRUCTIONS != 0 {
-                        // Disassemble executable sections
-                        let disasm = cs.disasm_all(section_data, section.addr)?;
-                        let mut instructions = Vec::new();
-                        for insn in disasm.iter() {
-                            let detail =  cs.insn_detail(insn)?;
-                            instructions.push(InstructionDetail {
-                                address: insn.address(),
-                                mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
-                                op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
-                                groups: detail.groups().into(),
-                                write_regs: detail.regs_write().into(),
-                                read_regs: detail.regs_read().into(),
-                            });
-                        }
-
-                        parsed_sections.push(Section::Code(CodeSection {
-                            name: section_name,
-                            instructions,
-                        }));
-                    } else {
-                        dw.maybe_add_section(&section_name,section_data)?;
-
-                        // Collect non-executable sections
-                        parsed_sections.push(Section::Info(InfoSection {
-                            name: section_name,
-                            data: section_data,
-                        }));
-                    }
-                }
-            }
-
-            // let dwarf = dw.load_dwarf()?;
-
-            Ok(MachineFile {
-                sections: parsed_sections,
-                // dwarf,
-                dwarf_loader:dw,
-            })
-        } else {
-            Err("Unsupported Mach-O format".into())
-        }
-    }
-    // Function to parse PE files
-    pub fn parse_pe(pe: &pe::PE, buffer: &'a [u8]) -> Result<MachineFile<'a>, Box<dyn Error>> {
-        // Windows PE format endianness is typically little-endian
-        let endian = RunTimeEndian::Little;
-
-        // Initialize Capstone for PE architecture
-        let cs = create_capstone_pe(pe)?;
-        let mut parsed_sections = Vec::new();
-        let mut dw = DwarfSectionLoader::new(endian);
-
-        // Iterate over PE sections
-        for section in &pe.sections {
-            let section_name = section.name().unwrap_or("unknown").to_string().into_boxed_str();
-            let section_data = &buffer[section.pointer_to_raw_data as usize..(section.pointer_to_raw_data as usize + section.size_of_raw_data as usize)];
-
-            if section.characteristics & pe::section_table::IMAGE_SCN_MEM_EXECUTE != 0 {
-                // Disassemble executable sections
-                let disasm = cs.disasm_all(section_data, section.virtual_address as u64)?;
-                let mut instructions = Vec::new();
-                for insn in disasm.iter() {
-                    let detail =  cs.insn_detail(insn)?;
-                    instructions.push(InstructionDetail {
-                        address: insn.address(),
-                        mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
-                        op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
-                        groups: detail.groups().into(),
-                        write_regs: detail.regs_write().into(),
-                        read_regs: detail.regs_read().into(),
-                    });
-                }
-
-                parsed_sections.push(Section::Code(CodeSection {
-                    name: section_name,
-                    instructions,
-                }));
-            } else {
-                dw.maybe_add_section(&section_name, section_data)?;
-
-                // Collect non-executable sections
-                parsed_sections.push(Section::Info(InfoSection {
-                    name: section_name,
-                    data: section_data,
-                }));
-            }
-        }
-
-        // let dwarf = dw.load_dwarf()?;
-
-        Ok(MachineFile {
-            sections: parsed_sections,
-            // dwarf,
-            dwarf_loader:dw
-        })
-    }
 }
 
-
-// Updated create_capstone_elf function to handle additional ELF architectures
-pub fn create_capstone_elf(elf: &elf::Elf) -> Result<Capstone, Box<dyn Error>> {
-    let cs = match elf.header.e_machine {
-        elf::header::EM_X86_64 => {
+fn create_capstone(obj: &object::File) -> Result<Capstone, Box<dyn Error>> {
+    let cs = match obj.architecture() {
+        object::Architecture::X86_64 => {
             Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(true).build()?
         }
-        elf::header::EM_386 => {
+        object::Architecture::I386 => {
             Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(true).build()?
         }
-        elf::header::EM_ARM => {
+        object::Architecture::Arm => {
             Capstone::new().arm().mode(arm::ArchMode::Arm).detail(true).build()?
         }
-        elf::header::EM_AARCH64 => {
+        object::Architecture::Aarch64 => {
             Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(true).build()?
         }
-        elf::header::EM_RISCV => {
+        object::Architecture::Riscv64 => {
             Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV64).detail(true).build()?
         }
-        elf::header::EM_MIPS => {
+
+        object::Architecture::Riscv32 => {
+            Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV32).detail(true).build()?
+        }
+
+        object::Architecture::Mips64 => {
             Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).detail(true).build()?
         }
-        elf::header::EM_PPC => {
+        object::Architecture::PowerPc => {
             Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
         }
-        elf::header::EM_PPC64 => {
+        object::Architecture::PowerPc64 => {
             Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).detail(true).build()?
         }
-        elf::header::EM_SPARC => {
+        object::Architecture::Sparc => {
             Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::Default).detail(true).build()?
         }
-        elf::header::EM_SPARCV9 => {
-            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::V9).detail(true).build()?
-        }
+
         // Add more architectures as needed
         _ => return Err("Unsupported architecture".into()),
     };
     Ok(cs)
 }
 
-// Updated create_capstone_mach function to match Mach-O CPU types, adding PowerPC
-pub fn create_capstone_mach(mach: &Mach<'_>) -> Result<Capstone, Box<dyn Error>> {
-    let cs = match mach {
-        Mach::Binary(mach_bin) => {
-            match mach_bin.header.cputype {
-                goblin::mach::constants::cputype::CPU_TYPE_X86_64 => {
-                    Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(true).build()?
-                }
-                goblin::mach::constants::cputype::CPU_TYPE_X86 => {
-                    Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(true).build()?
-                }
-                goblin::mach::constants::cputype::CPU_TYPE_ARM => {
-                    Capstone::new().arm().mode(arm::ArchMode::Arm).detail(true).build()?
-                }
-                goblin::mach::constants::cputype::CPU_TYPE_ARM64 => {
-                    Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(true).build()?
-                }
-                goblin::mach::constants::cputype::CPU_TYPE_POWERPC => {
-                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
-                }
-                goblin::mach::constants::cputype::CPU_TYPE_POWERPC64 => {
-                    Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).detail(true).build()?
-                }
-                _ => return Err("Unsupported architecture".into()),
-            }
-        }
-        _ => return Err("Unsupported Mach-O format".into()),
-    };
-    Ok(cs)
-}
 
-// Updated create_capstone_pe function to include additional PE architectures like MIPS and PowerPC
-pub fn create_capstone_pe(pe: &pe::PE) -> Result<Capstone, Box<dyn Error>> {
-    let cs = match pe.header.coff_header.machine {
-        pe::header::COFF_MACHINE_X86_64 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(true).build()?
-        }
-        pe::header::COFF_MACHINE_X86 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(true).build()?
-        }
-        pe::header::COFF_MACHINE_ARM => {
-            Capstone::new().arm().mode(arm::ArchMode::Arm).detail(true).build()?
-        }
-        pe::header::COFF_MACHINE_ARM64 => {
-            Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(true).build()?
-        }
-        pe::header::COFF_MACHINE_MIPSFPU => {
-            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).detail(true).build()?
-        }
-        pe::header::COFF_MACHINE_MIPSFPU16 => {
-            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips32).detail(true).build()?
-        }
-        pe::header::COFF_MACHINE_POWERPC => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
-        }
-        pe::header::COFF_MACHINE_POWERPCFP => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
-        }
 
-        _ => return Err("Unsupported architecture".into()),
-    };
-    Ok(cs)
+use object::{SectionFlags};
+
+fn should_disassemble(sec: &object::Section) -> bool {
+    match sec.flags() {
+        // Check for ELF executable flag
+        SectionFlags::Elf { sh_flags } => {
+            // Executable sections in ELF usually have the `SHF_EXECINSTR` flag set (0x4).
+            // `object::elf::SHF_EXECINSTR` is a constant representing this flag.
+            sh_flags & object::elf::SHF_EXECINSTR as u64 != 0
+        },
+        // Check for Mach-O executable flag
+        SectionFlags::MachO { flags } => {
+            // Mach-O executables sections typically have the `S_ATTR_PURE_INSTRUCTIONS` attribute set.
+            // `object::macho::S_ATTR_PURE_INSTRUCTIONS` is a constant representing this flag.
+            flags & object::macho::S_ATTR_PURE_INSTRUCTIONS != 0
+        },
+        // Check for COFF executable flag
+        SectionFlags::Coff { characteristics } => {
+            // COFF executable sections have the `IMAGE_SCN_MEM_EXECUTE` characteristic set.
+            // `object::coff::IMAGE_SCN_MEM_EXECUTE` is a constant representing this flag.
+            characteristics & IMAGE_SCN_MEM_EXECUTE != 0
+        },
+
+        // Default case for any unsupported section flags
+        SectionFlags::None => false,
+        _ => todo!(),
+    }
 }
