@@ -60,13 +60,7 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
             }
             Mode::File => {
                 let path =  fs::canonicalize(Path::new(&state.file_path))?;
-                code_files.visit_source_file(&path)?;
-                let file = code_files.source_files.get(&path);
-
-                // if file.is_none() {
-                //     println!("{:?}",code_files.source_files.keys());
-                //     return Err("no source file".into())
-                // }
+                let file = code_files.get_source_file(&path)?;
 
                 render_file_asm_viewer(&mut terminal, &mut state,file)?;
                 if handle_file_input(&mut state)? {

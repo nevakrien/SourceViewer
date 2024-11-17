@@ -388,7 +388,7 @@ fn asm_create_line_without_number(line: &Line,_cursor:usize) -> Spans {
 pub fn render_file_asm_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut State,
-    code_file: Option<&CodeFile>, // Use Option for CodeFile reference
+    code_file: &CodeFile, // Use Option for CodeFile reference
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
         let size = f.size();
@@ -451,7 +451,7 @@ pub fn render_file_asm_viewer(
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
 
-        if let Some(code_file) = code_file {
+        // if let Some(code_file) = code_file {
             if let Some(instructions) = code_file.asm.get(&(state.cursor as u32)) {
                 // Render instructions for the current line
                 let asm_items: Vec<ListItem> = instructions
@@ -478,13 +478,13 @@ pub fn render_file_asm_viewer(
                 let error_list = List::new(error_msg).block(asm_block);
                 f.render_widget(error_list, layout[1]);
             }
-        } else {
-           // Display an error message if `code_file` is None
-            let error_msg = vec![ListItem::new(Spans::from("Error: Assembly data is unavailable."))];
-            let error_list = List::new(error_msg).block(asm_block);
-            f.render_widget(error_list, layout[1]);
+        // } else {
+        //    // Display an error message if `code_file` is None
+        //     let error_msg = vec![ListItem::new(Spans::from("Error: Assembly data is unavailable."))];
+        //     let error_list = List::new(error_msg).block(asm_block);
+        //     f.render_widget(error_list, layout[1]);
 
-        }
+        // }
     })?;
     Ok(())
 }

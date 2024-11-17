@@ -191,6 +191,11 @@ impl CodeRegistry {
         CodeRegistry::default()
     }
 
+    pub fn get_source_file(&mut self,path : &Path) -> Result<&CodeFile,Box<dyn Error>>{
+        self.visit_source_file(path)?;
+        self.source_files.get(path).ok_or("failed to retrive source file".into())
+    }
+
     pub fn visit_source_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>>{
         if !self.visited.insert(path.into()) {
             return Ok(());
