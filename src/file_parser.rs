@@ -1,9 +1,7 @@
-use std::collections::hash_map;
 use std::collections::HashMap;
 use std::path::Path;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use object::File;
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
 use object::{Object,SectionFlags,ObjectSection};
 
@@ -111,7 +109,7 @@ impl<'a> MachineFile<'a> {
     }
 
     pub fn get_gimli_section(&self, section: SectionId) -> &'a [u8] {
-        self.obj.section_by_name(section.name()).map(|x| x.data().ok()).flatten().unwrap_or(&[])
+        self.obj.section_by_name(section.name()).and_then(|x| x.data().ok()).unwrap_or(&[])
     }
 
     pub fn load_dwarf(&mut self) -> Result<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>, gimli::Error>{

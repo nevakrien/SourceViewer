@@ -137,7 +137,7 @@ fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) {
 
     for section_name in &sections {
         // Find the section by name, get the data if available, or return an empty slice
-        let section_data = obj_file.section_by_name(section_name).map(|x| x.data().ok()).flatten().unwrap_or(&[]);
+        let section_data = obj_file.section_by_name(section_name).and_then(|x| x.data().ok()).unwrap_or(&[]);
         
         // Print the section name and content as UTF-8 (if possible)
         println!("{}:\n{}", section_name.blue(), String::from_utf8_lossy(section_data));
@@ -268,7 +268,7 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
     // Placeholder to simulate user selecting a file
     for file_name in source_files.iter() {
         let file :PathBuf= match fs::canonicalize(Path::new(file_name)) {
-            Ok(file) =>file.into(),
+            Ok(file) =>file,
             Err(_) => {
                 println!("{}",format!("{:?} does not exist",file_name ).red());
                 continue;

@@ -56,7 +56,7 @@ impl<'a> AsmRegistry<'a> {
                 };
                 let b = self.files_arena.alloc(buffer);
                 entry.insert(MachineFile::parse(b)
-                    .map_err(|e| WrapedError::new(e)))
+                    .map_err(WrapedError::new))
                     .as_mut().map_err(|e| e.clone().into())
             }
         }
@@ -182,7 +182,7 @@ impl CodeFile {
 
     #[inline]
     pub fn get_asm(&self,line:&u32,path:Arc<Path>) -> Option<&[InstructionDetail]> {
-        self.asm.get(&line)?.get(&path).map(|x| x.as_slice())//.unwrap_or(&[])
+        self.asm.get(line)?.get(&path).map(|x| x.as_slice())//.unwrap_or(&[])
     }
 }
 
