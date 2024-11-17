@@ -36,12 +36,12 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
 
     let arena = Arena::new();
     let mut registry = AsmRegistry::new(&arena);
-    let mut code_files = CodeRegistry::new();
+    let mut code_files = CodeRegistry::new(&mut registry);
 
     for f in file_paths {
         let file :Arc<Path>= f.into();
         println!("visiting file {:?}",&*file);
-        code_files.visit_machine_file(file,&mut registry)?;
+        code_files.visit_machine_file(file)?;
     }
 
     let mut terminal = create_terminal()?;
@@ -62,8 +62,8 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
                 }
             }
             Mode::File => {
-                let path =  fs::canonicalize(Path::new(&state.file_path))?;
-                let file = code_files.get_source_file(&path)?;
+                let path =  fs::canonicalize(Path::new(&state.file_path))?.into();
+                let file = code_files.get_source_file(path)?;
 
                 render_file_asm_viewer(&mut terminal, &mut state,file)?;
                 if handle_file_input(&mut state)? {
@@ -262,20 +262,36 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
 
 
 
-    println!("Select a file to view:");
+    println!("Source files:");
     for (index, file) in source_files.iter().enumerate() {
         println!("{}: {:?}", index, file);
     }
 
     // Placeholder to simulate user selecting a file
-    for file in source_files.iter() {
-        let source_text = std::fs::read_to_string(file)?;
+    for file_name in source_files.iter() {
+        let file :PathBuf= match fs::canonicalize(Path::new(file_name)) {
+            Ok(file) =>file.into(),
+            Err(_) => {
+                println!("{}",format!("{:?} does not exist",file_name ).red());
+                continue;
+            },
+        };
 
-        // Display the source text
-        println!("Contents of {:?}:", file);
-        for (i, line) in source_text.lines().enumerate() {
-            println!("{:4} {}", i + 1, line);
+        match std::fs::read_to_string(&file) {
+            Ok(source_text) => {
+                // Display the source text
+                println!("Contents of {:?}:", file);
+                for (i, line) in source_text.lines().enumerate() {
+                    println!("{:4} {}", i + 1, line);
+                }
+            }
+            Err(e) => {
+                println!("{} reading {:?}: {}","FAILED".red(), file,e);
+
+            }
         }
+
+        
     }
 
     Ok(())

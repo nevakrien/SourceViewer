@@ -1,17 +1,17 @@
-use colored::Colorize;
-use crate::errors::WrappedError;
+use crate::errors::StackedError;
+use crate::errors::WrapedError;
 use addr2line::LookupContinuation;
 use addr2line::LookupResult;
 use gimli::EndianSlice;
 use gimli::RunTimeEndian;
 use std::sync::Arc;
-use std::path::{Path,PathBuf};
+use std::path::{Path};
 use crate::file_parser::InstructionDetail;
 use std::fs;
 use crate::file_parser::Section;
 use addr2line::Context;
 use std::error::Error;
-use std::collections::{HashMap,BTreeMap,HashSet};
+use std::collections::{HashMap,BTreeMap};
 use crate::file_parser::MachineFile;
 
 
@@ -23,7 +23,7 @@ use  std::collections::hash_map;
 
 pub struct AsmRegistry<'a> {
     pub files_arena: &'a Arena<Vec<u8>>,
-    pub map: HashMap<Arc<Path>, Result<MachineFile<'a>,Box<WrappedError>> >
+    pub map: HashMap<Arc<Path>, Result<MachineFile<'a>, WrapedError> >
 }
 
 
@@ -50,13 +50,13 @@ impl<'a> AsmRegistry<'a> {
                     Ok(x) => x,
                     Err(e) => {return entry.insert(
                         Err(
-                            Box::new(WrappedError::new(Box::new(e)))
+                            WrapedError::new(Box::new(e))
                             ))
                         .as_ref().map_err(|e| e.clone().into())}
                 };
                 let b = self.files_arena.alloc(buffer);
                 entry.insert(MachineFile::parse(b)
-                    .map_err(|e| Box::new(WrappedError::new(e))))
+                    .map_err(|e| WrapedError::new(e)))
                     .as_ref().map_err(|e| e.clone().into())
             }
         }
@@ -163,10 +163,11 @@ pub struct Instruction{
     pub file: Arc<Path>
 }
 
-#[derive(PartialEq)]
+// #[derive(PartialEq)]
 pub struct CodeFile {
     pub text: String,
-    pub asm: BTreeMap<u32,Vec<Instruction>> //line -> instruction
+    pub asm: BTreeMap<u32,Vec<Instruction>>, //line -> instruction
+    pub errors: Vec<(StackedError,Option<Arc<Path>>)>
 }
 
 impl CodeFile {
@@ -174,119 +175,222 @@ impl CodeFile {
         let text = fs::read_to_string(path)?;
         Ok(CodeFile{
             text,
-            asm: BTreeMap::new()
+            asm: BTreeMap::new(),
+            errors: Vec::new(),
         }) 
     }
 }
 
-#[derive(Default)]
-pub struct CodeRegistry {
-    pub source_files :HashMap<Arc<Path>,CodeFile>,
-    pub visited : HashSet<Arc<Path>>,
+pub struct CodeRegistry<'a,'b> {
+    pub source_files :HashMap<Arc<Path>,Result<CodeFile,Box<WrapedError>>>,
+    asm:&'b mut AsmRegistry<'a>
+    // pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
 }
 
 
-impl CodeRegistry {
-    pub fn new() -> Self {
-        CodeRegistry::default()
-    }
+pub fn make_context<'a>(machine_file:&MachineFile<'a>) -> Result<Context<EndianSlice<'a,RunTimeEndian>>,Box<dyn Error>> {
+    Ok(Context::from_dwarf(machine_file.load_dwarf()?)?)
+}
 
-    pub fn get_source_file(&mut self,path : &Path) -> Result<&CodeFile,Box<dyn Error>>{
-        self.visit_source_file(path)?;
-        self.source_files.get(path).ok_or("failed to retrive source file".into())
-    }
-
-    pub fn visit_source_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>>{
-        self._visit_source_file(path.into())
-    }
-
-    // pub fn _visit_source_file(&mut self,path : Arc<Path>) -> Result<(),Box<dyn Error>>{
-    //     if !self.visited.insert(path.clone()) {
-    //         return Ok(());
-    //     }
-
-    //     let f = CodeFile::read(&path)?;
-    //     self.source_files.insert(path,f);
-    //     Ok(())
-    // }
-    pub fn _visit_source_file(&mut self, path: Arc<Path>) -> Result<(), Box<dyn Error>> {
-        // Attempt to insert a new entry if the path is not already present
-        if let std::collections::hash_map::Entry::Vacant(e) = self.source_files.entry(path.clone()) {
-            let f = CodeFile::read(&path)?;
-            e.insert(f); // Insert the file into the map
+impl<'a,'b> CodeRegistry<'a,'b> {
+    pub fn new(asm:&'b mut AsmRegistry<'a>) -> Self {
+        CodeRegistry {
+            asm,
+            source_files : HashMap::new(),
         }
-        Ok(())
     }
 
 
-    pub fn visit_machine_file(&mut self,path : Arc<Path>,asm:&mut AsmRegistry) -> Result<(),Box<dyn Error>> {
-        if !self.visited.insert(path.clone()) {
-            return Ok(());
-        }
 
-        //read and parse the file
-        let machine_file = asm.get_machine(path.clone()).map_err(|_e| "failed loading machine file")?;
-        let ctx = Context::from_dwarf(machine_file.load_dwarf().map_err(|_e| "failed load dwarf")?).map_err(|_e| "failed making ctx")?;
+    pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&mut CodeFile,Box<dyn Error>>{
+        match self.source_files.entry(path.clone()) {
+            hash_map::Entry::Occupied(entry)=> entry.into_mut().as_mut().map_err(|e| e.clone().into()),
+            hash_map::Entry::Vacant(entry) => {
+                let code_file = entry.insert(CodeFile::read(&path)
+                    .map_err(|e| Box::new(WrapedError::new(e)))
+                );
+
+               let code_file = match code_file {
+                    Ok(x) => x,
+                    Err(e) => {return Err((*e).clone().into());}
+               };
 
 
-        for section in &machine_file.sections {
-            match section {
-                Section::Code(code_section) => {
-                    for instruction in &code_section.instructions {
-                        
-                        //ignore missing but not invalid
-                        if let Some(loc) = ctx.find_location(instruction.address).map_err(|_e| "failed finding location")?{
-                            if let (Some(file_name),Some(line)) = (loc.file,loc.line){
-                                
-                                //TODO: this needs fixing!!!!
-                                let file :Arc<Path>= match fs::canonicalize(Path::new(file_name)) {
-                                    Ok(file) =>file.into(),
-                                    Err(_) => {
-                                        println!("{}",format!("{:?} does not exist",file_name ).red());
-                                        continue;
-                                    },
-                                };
-                                if self._visit_source_file(file.clone()).is_err( ){
-                                    println!("{}", format!("failed finding related source file {}",file.to_string_lossy()).red());
-                                    continue;
-                                } else {
-                                    println!("loaded {}",file.to_string_lossy());
+                for res in self.asm.map.values() {
+                    let machine_file = match res {
+                        Ok(x) => x,
+                        Err(e) => {
+                            let error = StackedError::from_wraped(e.clone(),"while getting machine");
+                            code_file.errors.push((error,None));
+                            continue;
+                        }
+                    };
+                    let ctx = match make_context(machine_file) {
+                        Ok(x) =>x,
+                        Err(e) => {
+                            let error = StackedError::new(e,"while getting machine");
+                            code_file.errors.push((error,None));
+                            continue;
+                            
+                        }
+                    };
 
-                                }
+                    for section in &machine_file.sections {
+                        match section {
+                            Section::Code(code_section) => {
+                                for instruction in &code_section.instructions {
 
-                                // let file = match self.source_files.get_mut(&file) {
-                                //     Some(file) => file,
-                                //     None => {
-                                //         //not sure how this can even triger
-                                //         println!("error happened with {}",file.to_string_lossy());
-                                //         continue;
-                                //     }
-                                // };
+                                    match ctx.find_location(instruction.address) {
+                                        Err(e) => {
+                                            let error = StackedError::new(Box::new(e),"while getting machine");
+                                            code_file.errors.push((error,None));                                        
+                                        }   
+                                        Ok(None)=> {},
+                                        Ok(Some(loc)) => 
+                                    
 
-                                // self._visit_source_file(file.clone()).map_err(|_e| format!("failed finding related source files {}",file.to_string_lossy()))?;
-                                let file = self.source_files.get_mut(&file).unwrap();
+                                        if let (Some(file_name),Some(line)) = (loc.file,loc.line){
+                                            // let file = match fs::canonicalize(Path::new(file_name)) {
+                                            //     Ok(file) =>file,
+                                            //     Err(_) => {
+                                            //         continue;
+                                            //     },
+                                            // };
 
-                                //insert
-                                let x = Instruction {
-                                    detail: instruction.clone(),
-                                    file: path.clone()
-                                };
+                                            let file = Path::new(file_name);
 
-                                file.asm.entry(line).or_default().push(x);
+                                            if *file!=*path {
+                                                continue;
+                                            }
+                                            let x = Instruction {
+                                                detail: instruction.clone(),
+                                                file: path.clone()
+                                            };
 
-                            }
+                                            code_file.asm.entry(line).or_default().push(x);
+
+                                        }
+
+                                    }
+                                }  
+                            },
+                            Section::Info(_) =>{}
                         }
                     }
-                },
-                _ => {},
-            }
-        } ;
-        // todo!()
-        Ok(())
+                    
+                }
 
+                
+                Ok(code_file)
+            }
+        }
+    }
+
+    pub fn visit_machine_file(&mut self,path : Arc<Path>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
+        self.asm.get_machine(path)
     }
 }
+// impl CodeRegistry {
+//     pub fn new() -> Self {
+//         CodeRegistry::default()
+//     }
+
+//     pub fn get_source_file(&mut self,path : &Path) -> Result<&CodeFile,Box<dyn Error>>{
+//         self.visit_source_file(path)?;
+//         self.source_files.get(path).ok_or("failed to retrive source file".into())
+//     }
+
+//     pub fn visit_source_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>>{
+//         self._visit_source_file(path.into())
+//     }
+
+//     // pub fn _visit_source_file(&mut self,path : Arc<Path>) -> Result<(),Box<dyn Error>>{
+//     //     if !self.visited.insert(path.clone()) {
+//     //         return Ok(());
+//     //     }
+
+//     //     let f = CodeFile::read(&path)?;
+//     //     self.source_files.insert(path,f);
+//     //     Ok(())
+//     // }
+//     pub fn _visit_source_file(&mut self, path: Arc<Path>) -> Result<(), Box<dyn Error>> {
+//         // Attempt to insert a new entry if the path is not already present
+//         if let std::collections::hash_map::Entry::Vacant(e) = self.source_files.entry(path.clone()) {
+//             let f = CodeFile::read(&path)?;
+//             e.insert(f); // Insert the file into the map
+//         }
+//         Ok(())
+//     }
+
+
+//     pub fn visit_machine_file(&mut self,path : Arc<Path>
+//         if !self.visited.insert(path.clone()) {
+//             return Ok(());
+//         }
+
+//         //read and parse the file
+//         let machine_file = asm.get_machine(path.clone()).map_err(|_e| "failed loading machine file")?;
+//         let ctx = Context::from_dwarf(machine_file.load_dwarf().map_err(|_e| "failed load dwarf")?).map_err(|_e| "failed making ctx")?;
+
+
+//         for section in &machine_file.sections {
+//             match section {
+//                 Section::Code(code_section) => {
+//                     for instruction in &code_section.instructions {
+                        
+//                         //ignore missing but not invalid
+//                         if let Some(loc) = ctx.find_location(instruction.address).map_err(|_e| "failed finding location")?{
+//                             if let (Some(file_name),Some(line)) = (loc.file,loc.line){
+                                
+//                                 //TODO: this needs fixing!!!!
+//                                 let file :Arc<Path>= match fs::canonicalize(Path::new(file_name)) {
+//                                     Ok(file) =>file.into(),
+//                                     Err(_) => {
+//                                         println!("{}",format!("{:?} does not exist",file_name ).red());
+//                                         continue;
+//                                     },
+//                                 };
+//                                 if self._visit_source_file(file.clone()).is_err( ){
+//                                     println!("{}", format!("failed finding related source file {}",file.to_string_lossy()).red());
+//                                     continue;
+//                                 } else {
+//                                     println!("loaded {}",file.to_string_lossy());
+
+//                                 }
+
+//                                 // let file = match self.source_files.get_mut(&file) {
+//                                 //     Some(file) => file,
+//                                 //     None => {
+//                                 //         //not sure how this can even triger
+//                                 //         println!("error happened with {}",file.to_string_lossy());
+//                                 //         continue;
+//                                 //     }
+//                                 // };
+
+//                                 // self._visit_source_file(file.clone()).map_err(|_e| format!("failed finding related source files {}",file.to_string_lossy()))?;
+//                                 let file = self.source_files.get_mut(&file).unwrap();
+
+//                                 //insert
+//                                 let x = Instruction {
+//                                     detail: instruction.clone(),
+//                                     file: path.clone()
+//                                 };
+
+//                                 file.asm.entry(line).or_default().push(x);
+
+//                             }
+//                         }
+//                     }
+//                 },
+//                 _ => {},
+//             }
+//         } ;
+//         // todo!()
+//         Ok(())
+
+//     }
+// }
 
 
 
