@@ -1,3 +1,4 @@
+
 use crate::program_context::AsmRegistry;
 use typed_arena::Arena;
 use crate::program_context::resolve_func_name;
@@ -55,6 +56,32 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+
+use object::{File, Object,ObjectSection};
+fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) {
+    let sections = [
+        ".debug_abbrev",
+        ".debug_addr",
+        ".debug_aranges",
+        ".debug_info",
+        ".debug_line",
+        ".debug_line_str",
+        ".debug_str",
+        ".debug_str_offsets",
+        ".debug_types",
+        ".debug_loc",
+        ".debug_ranges",
+    ];
+
+    for section_name in &sections {
+        // Find the section by name, get the data if available, or return an empty slice
+        let section_data = obj_file.section_by_name(section_name).map(|x| x.data().ok()).flatten().unwrap_or(&[]);
+        
+        // Print the section name and content as UTF-8 (if possible)
+        println!("{}:\n{}", section_name.blue(), String::from_utf8_lossy(section_data));
+    }
+}
+
 pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `sections` command
     let file_paths: Vec<PathBuf> = matches
@@ -72,11 +99,8 @@ pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Erro
         let machine_file = MachineFile::parse(&buffer)?;
         // let dwarf = machine_file.load_dwarf()?;
         // println!("{:#?}",dwarf );
-        for (id,v) in machine_file.dwarf_loader.sections {
-            println!("{}:\n{}",
-                format!("{:?}",id).blue(),
-                String::from_utf8_lossy(v) );
-        }
+        list_dwarf_sections(&machine_file.obj);
+        
     }
     println!("{}", message);
 

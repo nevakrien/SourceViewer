@@ -73,7 +73,7 @@ pub fn map_instructions_to_source(
     let mut mapping = AddressFileMapping::new();
 
     // Create addr2line context from DWARF data
-    let ctx = Context::from_dwarf(machine_file.dwarf_loader.load_dwarf()?)?;
+    let ctx = Context::from_dwarf(machine_file.load_dwarf()?)?;
 
     // Iterate through each code section and map addresses to source
     for section in &machine_file.sections {
@@ -206,7 +206,7 @@ impl CodeRegistry {
 
         //read and parse the file
         let machine_file = asm.get_machine(path.clone())?;
-        let ctx = Context::from_dwarf(machine_file.dwarf_loader.load_dwarf()?)?;
+        let ctx = Context::from_dwarf(machine_file.load_dwarf()?)?;
 
 
         for section in &machine_file.sections {

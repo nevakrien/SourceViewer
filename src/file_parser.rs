@@ -1,27 +1,16 @@
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
-use object::ObjectSection;
-use object::Object;
-// use goblin::pe;
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
-// use goblin::mach;
-// use goblin::mach::Mach;
-// use goblin::elf;
+use object::{Object,SectionFlags,ObjectSection};
+
 use gimli::RunTimeEndian;
 use capstone::arch::{arm, arm64, x86};
 use capstone::prelude::*;
-// use goblin::Object;
 use gimli::{read::Dwarf, SectionId, EndianSlice};
-use std::{fmt};
 use std::error::Error;
 
-#[derive(Clone,Debug,PartialEq)]
+#[derive(Debug)]
 pub struct MachineFile<'a> {
-    pub arch: object::Architecture,
+    pub obj: object::File<'a>,
     pub sections: Vec<Section<'a>>,
-    // pub object: goblin::Object<'a>,
-    // pub dwarf: gimli::read::Dwarf<EndianSlice<'a, RunTimeEndian>>,
-    pub dwarf_loader: DwarfSectionLoader<'a>
 }
 
 #[derive(Clone,Debug,PartialEq)]
@@ -55,124 +44,31 @@ pub struct InfoSection<'a> {
 pub struct InstructionDetail {
     pub address: u64,
     pub mnemonic: Box<str>,
-    pub op_str: Box<str>,
+    pub op_str: String,
     pub size: usize,
-
-    // pub read_regs : Box<[RegId]>,
-    // pub write_regs : Box<[RegId]>,
-    // pub groups: Box<[InsnGroupId]>,
-}
-
-// impl InstructionDetail {
-//     /// Check if the instruction belongs to a specific group
-//     pub fn has_group(&self, group: u32) -> bool {
-//         self.groups.iter().any(|&g| g == InsnGroupId(group as u8))
-//     }
-// }
-
-
-// Define a struct to hold DWARF section data
-#[derive(Clone,Debug,PartialEq)]
-pub struct DwarfSectionLoader<'a> {
-    pub sections: HashMap<SectionId, &'a [u8]>,
-    endian: RunTimeEndian,
 }
 
 
-#[derive(Debug,Clone)]
-struct DuplicateEntry;
 
-impl fmt::Display for DuplicateEntry {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Duplicate entry detected")
-    }
-}
-
-impl std::error::Error for DuplicateEntry {}
-
-impl<'a> DwarfSectionLoader<'a> {
-    fn new(endian: RunTimeEndian) -> Self {
-        Self {
-            sections: HashMap::new(),
-            endian,
-        }
-    }
-
-    
-
-    // Method to add a section if it matches one of the DWARF sections
-    fn maybe_add_section(&mut self, section_name: &str, data: &'a [u8]) -> Result<bool,DuplicateEntry>{
-        let section_id = match section_name {
-            ".debug_line" => Some(SectionId::DebugLine),
-            ".debug_info" => Some(SectionId::DebugInfo),
-            ".debug_abbrev" => Some(SectionId::DebugAbbrev),
-            ".debug_str" => Some(SectionId::DebugStr),
-            ".debug_ranges" => Some(SectionId::DebugRanges),
-            ".debug_rnglists" => Some(SectionId::DebugRngLists),
-            ".debug_addr" => Some(SectionId::DebugAddr),
-            ".debug_aranges" => Some(SectionId::DebugAranges),
-            ".debug_loc" => Some(SectionId::DebugLoc),
-            ".debug_loclists" => Some(SectionId::DebugLocLists),
-            ".debug_line_str" => Some(SectionId::DebugLineStr),
-            ".debug_str_offsets" => Some(SectionId::DebugStrOffsets),
-            ".debug_types" => Some(SectionId::DebugTypes),
-            ".debug_macinfo" => Some(SectionId::DebugMacinfo),
-            ".debug_macro" => Some(SectionId::DebugMacro),
-            ".debug_pubnames" => Some(SectionId::DebugPubNames),
-            ".debug_pubtypes" => Some(SectionId::DebugPubTypes),
-            ".debug_cu_index" => Some(SectionId::DebugCuIndex),
-            ".debug_tu_index" => Some(SectionId::DebugTuIndex),
-            ".debug_frame" => Some(SectionId::DebugFrame),
-            ".eh_frame" => Some(SectionId::EhFrame),
-            ".eh_frame_hdr" => Some(SectionId::EhFrameHdr),
-
-            //mising cases
-            ".debug_names"| ".debug_sup" | ".debug_str_sup" => todo!(),
-            ".gdb_index" | ".debug_gnu_pubnames" | ".debug_gnu_pubtypes" => todo!(),
-
-
-            name => if name.starts_with(".zdebug_") {todo!()} else {None},
-        };
-
-        if let Some(id) = section_id {
-            match self.sections.entry(id) {
-                Entry::Vacant(entry) => {
-                    entry.insert(data);
-                    Ok(true)
-                }
-                Entry::Occupied(_) => Err(DuplicateEntry),
-            }
-        } else {
-            Ok(false)
-        }
-    }
-
-    // Method to retrieve a section's data by its DWARF SectionId
-    pub fn get_section(&self, section: SectionId) -> &'a [u8] {
-        self.sections.get(&section).copied().unwrap_or(&[])
-    }
-
-    // Method to load DWARF data using the stored sections
-    pub fn load_dwarf(&self) -> Result<Dwarf<EndianSlice<'a,RunTimeEndian>>, gimli::Error> {
-        Dwarf::load(|section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
-            Ok(EndianSlice::new(self.get_section(section), self.endian))
-        })
-    }
-}
 
 impl<'a> MachineFile<'a> {
+    pub fn get_gimli_section(&self, section: SectionId) -> &'a [u8] {
+        self.obj.section_by_name(section.name()).map(|x| x.data().ok()).flatten().unwrap_or(&[])
+    }
+
     pub fn load_dwarf(&self) -> Result<Dwarf<EndianSlice<'a,RunTimeEndian>>, gimli::Error>{
-        self.dwarf_loader.load_dwarf()
+       let endian = if self.obj.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
+       Dwarf::load(|section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
+            Ok(EndianSlice::new(self.get_gimli_section(section), endian))
+        })
     }
 
     pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
         let obj = object::File::parse(buffer)?;
         let arch = obj.architecture();
-        let endian = if obj.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
         let mut cs = create_capstone(&arch)?;
         cs.set_skipdata(true)?;
         let mut parsed_sections = Vec::new();
-        let mut dw = DwarfSectionLoader::new(endian);
         
         for section in obj.sections() {
             let section_name :Box<str>= section.name()?.into();
@@ -183,16 +79,13 @@ impl<'a> MachineFile<'a> {
                 let disasm = cs.disasm_all(section_data, section.address())?;
                 let mut instructions = Vec::new();
                 for insn in disasm.iter() {
-                    // let detail =  cs.insn_detail(insn)?;
                     instructions.push(InstructionDetail {
                         address: insn.address(),
                         mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
-                        op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
+                        op_str: insn.op_str().unwrap_or("unknown").to_owned(),
                         size: insn.len(),
 
-                        // groups: detail.groups().into(),
-                        // write_regs: detail.regs_write().into(),
-                        // read_regs: detail.regs_read().into(),
+
                     });
                 }
 
@@ -201,7 +94,6 @@ impl<'a> MachineFile<'a> {
                     instructions,
                 }));
             } else {
-                dw.maybe_add_section(&section_name,section_data)?;
                 // Collect non-executable sections
                 parsed_sections.push(Section::Info(InfoSection {
                     name: section_name,
@@ -211,10 +103,8 @@ impl<'a> MachineFile<'a> {
 
         }
         Ok(MachineFile {
-            arch,
+            obj,
             sections: parsed_sections,
-            // object: obj,
-            dwarf_loader:dw,
         })
     }
 
@@ -263,7 +153,6 @@ fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Erro
 
 
 
-use object::{SectionFlags};
 
 fn should_disassemble(sec: &object::Section) -> bool {
     match sec.flags() {
