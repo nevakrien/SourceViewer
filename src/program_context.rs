@@ -145,7 +145,7 @@ pub fn find_func_name<'a,'b:'a>(addr2line: &DebugContext<'a >, registry: &mut As
                 }
                 return None;
             }
-            LookupResult::Output(Err(e)) => {
+            LookupResult::Output(Err(_e)) => {
                 // println!("error case {}",e);
 
                 return None;

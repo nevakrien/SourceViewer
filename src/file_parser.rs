@@ -55,18 +55,19 @@ pub struct InstructionDetail {
     pub address: u64,
     pub mnemonic: Box<str>,
     pub op_str: Box<str>,
+    pub size: usize,
 
-    pub read_regs : Box<[RegId]>,
-    pub write_regs : Box<[RegId]>,
-    pub groups: Box<[InsnGroupId]>,
+    // pub read_regs : Box<[RegId]>,
+    // pub write_regs : Box<[RegId]>,
+    // pub groups: Box<[InsnGroupId]>,
 }
 
-impl InstructionDetail {
-    /// Check if the instruction belongs to a specific group
-    pub fn has_group(&self, group: u32) -> bool {
-        self.groups.iter().any(|&g| g == InsnGroupId(group as u8))
-    }
-}
+// impl InstructionDetail {
+//     /// Check if the instruction belongs to a specific group
+//     pub fn has_group(&self, group: u32) -> bool {
+//         self.groups.iter().any(|&g| g == InsnGroupId(group as u8))
+//     }
+// }
 
 
 // Define a struct to hold DWARF section data
@@ -166,7 +167,8 @@ impl<'a> MachineFile<'a> {
     pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
         let obj = object::File::parse(buffer)?;
         let endian = if obj.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
-        let cs = create_capstone(&obj)?;
+        let mut cs = create_capstone(&obj)?;
+        cs.set_skipdata(true)?;
         let mut parsed_sections = Vec::new();
         let mut dw = DwarfSectionLoader::new(endian);
         
@@ -179,14 +181,16 @@ impl<'a> MachineFile<'a> {
                 let disasm = cs.disasm_all(section_data, section.address())?;
                 let mut instructions = Vec::new();
                 for insn in disasm.iter() {
-                    let detail =  cs.insn_detail(insn)?;
+                    // let detail =  cs.insn_detail(insn)?;
                     instructions.push(InstructionDetail {
                         address: insn.address(),
                         mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
                         op_str: insn.op_str().unwrap_or("unknown").to_owned().into_boxed_str(),
-                        groups: detail.groups().into(),
-                        write_regs: detail.regs_write().into(),
-                        read_regs: detail.regs_read().into(),
+                        size: insn.len(),
+
+                        // groups: detail.groups().into(),
+                        // write_regs: detail.regs_write().into(),
+                        // read_regs: detail.regs_read().into(),
                     });
                 }
 
@@ -216,36 +220,36 @@ impl<'a> MachineFile<'a> {
 fn create_capstone(obj: &object::File) -> Result<Capstone, Box<dyn Error>> {
     let cs = match obj.architecture() {
         object::Architecture::X86_64 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(true).build()?
+            Capstone::new().x86().mode(x86::ArchMode::Mode64).detail(false).build()?
         }
         object::Architecture::I386 => {
-            Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(true).build()?
+            Capstone::new().x86().mode(x86::ArchMode::Mode32).detail(false).build()?
         }
         object::Architecture::Arm => {
-            Capstone::new().arm().mode(arm::ArchMode::Arm).detail(true).build()?
+            Capstone::new().arm().mode(arm::ArchMode::Arm).detail(false).build()?
         }
         object::Architecture::Aarch64 => {
-            Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(true).build()?
+            Capstone::new().arm64().mode(arm64::ArchMode::Arm).detail(false).build()?
         }
         object::Architecture::Riscv64 => {
-            Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV64).detail(true).build()?
+            Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV64).detail(false).build()?
         }
 
         object::Architecture::Riscv32 => {
-            Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV32).detail(true).build()?
+            Capstone::new().riscv().mode(capstone::arch::riscv::ArchMode::RiscV32).detail(false).build()?
         }
 
         object::Architecture::Mips64 => {
-            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).detail(true).build()?
+            Capstone::new().mips().mode(capstone::arch::mips::ArchMode::Mips64).detail(false).build()?
         }
         object::Architecture::PowerPc => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(true).build()?
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode32).detail(false).build()?
         }
         object::Architecture::PowerPc64 => {
-            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).detail(true).build()?
+            Capstone::new().ppc().mode(capstone::arch::ppc::ArchMode::Mode64).detail(false).build()?
         }
         object::Architecture::Sparc => {
-            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::Default).detail(true).build()?
+            Capstone::new().sparc().mode(capstone::arch::sparc::ArchMode::Default).detail(false).build()?
         }
 
         // Add more architectures as needed
