@@ -228,6 +228,46 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
+pub fn view_sources_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
+    // Collect all file paths provided by the user for the `view_source` command
+    let file_paths: Vec<PathBuf> = matches
+        .get_many::<PathBuf>("BINS")
+        .expect("BINS argument is required")
+        .cloned()
+        .collect();
+
+
+    // Initialize a basic editor interface
+    // TODO: Use a library like `crossterm` to set up the interface
+    // For now, placeholder logic to prompt file selection
+    let mut filemaps: Vec<AddressFileMapping> = Vec::new();
+    let mut source_files: HashSet<String> = HashSet::new();
+
+
+    // Load files into registry
+    for file_path in file_paths {
+        println!("{}", format!("Loading file {:?}", file_path).green().bold());
+        // registry.add_file(file_path.clone())?;
+
+        let buffer = fs::read(file_path)?;
+        let mut machine_file = MachineFile::parse(&buffer)?;
+
+        let map = map_instructions_to_source(&mut machine_file)?;
+        for (s,_) in map.values() {
+            source_files.insert(s.to_string());
+        }
+        filemaps.push(map);
+    }
+
+
+
+    println!("Source files:");
+    for (index, file) in source_files.iter().enumerate() {
+        println!("{}: {:?}", index, file);
+    }
+    Ok(())
+}
+
 #[derive(Debug,Clone)]
 pub enum FileSelection {
     Index(usize),

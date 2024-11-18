@@ -48,6 +48,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ),
         )
 
+        
 
         .subcommand(
             Command::new("view_source")
@@ -88,6 +89,19 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             )
 
+        .subcommand(
+            Command::new("view_sources")
+                .about("dumps all source files made to make bins")
+                .arg(
+                    Arg::new("BINS")
+                        .help("Input binary/object files to process")
+                        .required(true)
+                        .num_args(1..) // Allows multiple file paths
+                        .value_parser(clap::value_parser!(PathBuf)),
+                ),
+        )
+
+
 
         .subcommand(
             {
@@ -115,6 +129,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Some(("lines", sub_m)) => lines_command(sub_m),
         Some(("sections", sub_m)) => sections_command(sub_m),
         Some(("view_source", sub_m)) => view_source_command(sub_m),
+        Some(("view_sources", sub_m)) => view_sources_command(sub_m),
         Some(("dwarf_dump", sub_m)) => dwarf_dump_command(sub_m),
         Some(("walk", sub_m)) => walk_command(sub_m),
         _ => {
