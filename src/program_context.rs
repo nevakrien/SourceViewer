@@ -1,3 +1,4 @@
+// use cachingmap::CachingMap;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
 use addr2line::LookupContinuation;
@@ -23,7 +24,8 @@ use  std::collections::hash_map;
 
 pub struct AsmRegistry<'a> {
     pub files_arena: &'a Arena<Vec<u8>>,
-    pub map: HashMap<Arc<Path>, Result<MachineFile<'a>, WrapedError> >
+    // pub map: CachingMap<Arc<Path>, Result<MachineFile<'a>, WrapedError>>
+    pub map: HashMap<Arc<Path>, Result<MachineFile<'a>, WrapedError>>
 }
 
 
@@ -33,11 +35,16 @@ impl<'a> AsmRegistry<'a> {
     pub fn new( files_arena: &'a Arena<Vec<u8>>) -> Self {
         AsmRegistry{
             files_arena,
-            map:HashMap::new()
+            map:HashMap::new().into()
         }
     }
 
-
+    pub fn get_existing_machine(&self, path:&Arc<Path>) -> Result<&MachineFile<'a>,Box<dyn Error>>{
+        match self.map.get(path) {
+            None => Err("file not cached".into()),
+            Some(x) => x.as_ref().map_err(|e| e.clone().into()),
+        }
+    }
 
     pub fn get_machine(&mut self, path:Arc<Path>) -> Result<&mut MachineFile<'a>,Box<dyn Error>>{
         //code looks so ugly because we cant pull into a side function or the borrow checker will freak out
@@ -187,7 +194,7 @@ impl CodeFile {
 }
 
 pub struct CodeRegistry<'a,'b> {
-    pub source_files :HashMap<Arc<Path>,Result<CodeFile,Box<WrapedError>>>,
+    pub source_files :HashMap<Arc<Path>,Result<Arc<CodeFile>,Box<WrapedError>>>,
     asm:&'b mut AsmRegistry<'a>
     // pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
@@ -206,11 +213,12 @@ impl<'a,'b> CodeRegistry<'a,'b> {
         }
     }
 
-    pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&mut CodeFile,Box<dyn Error>>{
+    pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<Arc<CodeFile>,Box<dyn Error>>{
         match self.source_files.entry(path.clone()) {
-            hash_map::Entry::Occupied(entry)=> entry.into_mut().as_mut().map_err(|e| e.clone().into()),
+            hash_map::Entry::Occupied(entry)=> entry.into_mut().as_ref().map_err(|e| e.clone().into()).cloned(),
             hash_map::Entry::Vacant(entry) => {
                 let code_file = entry.insert(CodeFile::read(&path)
+                    .map(Arc::new)
                     .map_err(|e| Box::new(WrapedError::new(e)))
                 );
 
@@ -219,12 +227,14 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                     Err(e) => {return Err((*e).clone().into());}
                };
 
+               let hanle = Arc::get_mut(code_file).unwrap();
+
                 for (obj_path,res) in self.asm.map.iter_mut() {
                     let machine_file = match res {
                         Ok(x) => x,
                         Err(e) => {
                             let error = StackedError::from_wraped(e.clone(),"while getting machine");
-                            code_file.errors.push((error,None));
+                            hanle.errors.push((error,None));
                             continue;
                         }
                     };
@@ -232,7 +242,7 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                         Ok(x) =>x,
                         Err(e) => {
                             let error = StackedError::new(e,"while making context");
-                            code_file.errors.push((error,None));
+                            hanle.errors.push((error,None));
                             continue;
                             
                         }
@@ -240,7 +250,7 @@ impl<'a,'b> CodeRegistry<'a,'b> {
 
                     if let Some(line_map) = map.get(&path){
                         for (line,v) in line_map.iter_maped() {
-                            let spot = code_file.asm
+                            let spot = hanle.asm
                             .entry(*line)
                             .or_insert(HashMap::new())
                             .entry(obj_path.clone())
@@ -255,7 +265,7 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                 }
 
                 
-                Ok(code_file)
+                Ok(code_file.clone())
             }
         }
     }

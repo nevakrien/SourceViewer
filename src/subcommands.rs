@@ -1,4 +1,5 @@
 
+use crate::program_context::CodeFile;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::Path;
@@ -61,10 +62,10 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
                 }
             }
             Mode::File => {
-                let path =  fs::canonicalize(Path::new(&state.file_path))?.into();
-                let file = code_files.get_source_file(path)?;
+                let path :Arc<Path>=  fs::canonicalize(Path::new(&state.file_path))?.into();
+                let file :Arc<CodeFile>= code_files.get_source_file(path.clone())?;
 
-                render_file_asm_viewer(&mut terminal, &mut state,file,obj_file.clone())?;
+                render_file_asm_viewer(&mut terminal, &mut state,&*file,obj_file.clone())?;
                 if handle_file_input(&mut state)? {
                     break;
                 }
@@ -183,7 +184,7 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer)?;
+        let machine_file = MachineFile::parse(&buffer)?;
         let debug = machine_file.load_dwarf().ok().and_then(|dwarf_data| {
             addr2line::Context::from_arc_dwarf(dwarf_data).ok()
         });

@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::collections::btree_map;
 use std::collections::HashMap;
 use std::path::Path;
@@ -50,18 +51,16 @@ impl FileMap {
     // }
 }
 
-#[derive(Debug)]
-pub struct  MachineFileInner<'a> {
-    pub obj: object::File<'a>,
-    pub sections: Vec<Section<'a>>,
-}
+
+
+type MyDwarf<'a> = Dwarf<EndianSlice<'a,RunTimeEndian>>;
 
 #[derive(Debug)]
 pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
     pub sections: Vec<Section<'a>>,
-    pub dwarf : Option<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>>,
-    pub file_lines: Option<Arc<FileMap>>, //line -> instruction>,
+    pub dwarf : OnceLock<Arc<MyDwarf<'a>>>,
+    pub file_lines: OnceLock<Arc<FileMap>>, //line -> instruction>,
 }
 
 #[derive(Clone,Debug,PartialEq)]
@@ -105,8 +104,8 @@ pub struct InstructionDetail {
 
 
 impl<'a> MachineFile<'a> {
-    pub fn get_lines_map(&mut self) -> Result<Arc<FileMap>, Box<dyn Error>> {
-        if let Some(ans) = &self.file_lines {
+    pub fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
+        if let Some(ans) = self.file_lines.get() {
             return Ok(ans.clone())
         }
 
@@ -156,7 +155,7 @@ impl<'a> MachineFile<'a> {
             }
         }
 
-        self.file_lines = Some(ans.clone());
+        self.file_lines.set(ans.clone()).unwrap();
         Ok(ans)
     }
 
@@ -164,8 +163,8 @@ impl<'a> MachineFile<'a> {
         self.obj.section_by_name(section.name()).and_then(|x| x.data().ok()).unwrap_or(&[])
     }
 
-    pub fn load_dwarf(&mut self) -> Result<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>, gimli::Error>{
-        if let Some(dwarf) = &self.dwarf {
+    pub fn load_dwarf(&self) -> Result<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>, gimli::Error>{
+        if let Some(dwarf) = self.dwarf.get() {
             return Ok(dwarf.clone())
         }
 
@@ -174,8 +173,9 @@ impl<'a> MachineFile<'a> {
             Ok(EndianSlice::new(self.get_gimli_section(section), endian))
         });
 
-       self.dwarf = Some(dwarf?.into());
-       Ok(self.dwarf.clone().unwrap())
+       let dwarf :Arc<MyDwarf<'a>> = dwarf?.into();
+       self.dwarf.set(dwarf.clone()).unwrap();
+       Ok(dwarf)
     }
 
     pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
@@ -223,8 +223,8 @@ impl<'a> MachineFile<'a> {
         Ok(MachineFile {
             obj,
             sections: parsed_sections,
-            dwarf:None,
-            file_lines: None
+            dwarf:OnceLock::new(),
+            file_lines: OnceLock::new(),
         })
     }
 

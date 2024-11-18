@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeFile;
@@ -31,7 +32,7 @@ pub enum Mode {
     File,
 }
 
-pub struct State {
+pub struct State<'a> {
     pub current_dir: PathBuf,
     pub original_dir: PathBuf,
     pub dir_list_state: ListState,
@@ -45,16 +46,21 @@ pub struct State {
     pub show_lines: bool,
 
     pub asm_cursor: usize,
+    pub asm_lines: BTreeMap<usize,Option<&'a [InstructionDetail]>>
+
+    //wish i could do
+    // pub asm_lines: BTreeMap<usize,Option<&'a [InstructionDetail]>>
+    //but for the life of me cant figure out a cached hashmap like
 
 }
 
-impl Default for State {
+impl Default for State<'_> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl State {
+impl State<'_> {
     pub fn new() -> Self {
         Self {
             current_dir: PathBuf::from("."),
@@ -69,6 +75,7 @@ impl State {
             show_lines: false,
 
             asm_cursor:0,
+            asm_lines: BTreeMap::default()
         }
     }
 }
@@ -192,87 +199,8 @@ pub fn load_file(state:&mut State,path:&PathBuf) -> Result<(), Box<dyn std::erro
 }
 
 
-pub fn render_file_viewer(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    state: &mut State,
-) -> Result<(), Box<dyn std::error::Error>> {
-    terminal.draw(|f| {
-        let size = f.size();
-        let max_visible_lines = size.height.saturating_sub(2) as usize;
-
-        // Adjust `file_scroll` to keep `cursor` within the visible range
-        if state.cursor < state.file_scroll {
-            state.file_scroll = state.cursor; // Scroll up
-        } else if state.cursor >= state.file_scroll + max_visible_lines {
-            state.file_scroll = state.cursor - max_visible_lines + 1; // Scroll down
-        }
-
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(100)].as_ref())
-            .split(size);
-
-        let file_block = Block::default()
-            .borders(Borders::ALL)
-            .title(Span::styled(
-                format!("File Viewer - {}", state.file_path),
-                Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-            ));
-
-        let items: Vec<ListItem> = state
-            .file_content
-            .iter()
-            .skip(state.file_scroll)
-            .take(max_visible_lines)
-            .map(|line| {
-                create_line(line,state.cursor,state.show_lines)
-                // if state.show_lines {
-                //     ListItem::new(vec![create_line_with_number(line,state.cursor)])
-                // } else {
-                //     ListItem::new(vec![create_line_without_number(line,state.cursor)])
-                // }
-            })
-            .collect();
-
-        let mut list_state = ListState::default();
-        list_state.select(Some(state.cursor - state.file_scroll));
-
-        let list = List::new(items)
-            .block(file_block)
-            .highlight_style(Style::default().bg(Color::DarkGray).add_modifier(Modifier::BOLD));
-
-        f.render_stateful_widget(list, layout[0], &mut list_state);
-    })?;
-    Ok(())
-}
-
-
-// Helper function to create a line without a line number and styling
-fn create_line(line: &Line,_line_index:usize,show_lines:bool) -> ListItem {
-    let line_style = if line.is_selected {
-        Style::default().fg(Color::Red)
-    } else {
-        Style::default()
-    };
-
-    let line_number_span = if show_lines {
-            Span::styled(
-            format!("{:<4}", line.line_number),
-            Style::default().fg(Color::Blue),)
-        } else {
-            Span::raw("")
-        }
-    ;
-
-    let line_content_span = Span::styled(line.content.clone(), line_style);
-    ListItem::new(Spans::from(vec![line_number_span, line_content_span]))
-}
-
-
-
-
-
-pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
+//code_file: &'a CodeFile,obj_path: Arc<Path>
+pub fn handle_file_input<'a>(state: &mut State<'a>, ) -> Result<bool, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
             KeyCode::Char('q') => return Ok(true),
@@ -318,6 +246,15 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
                 // Toggle selection of the current line under the cursor
                 if let Some(line) = state.file_content.get_mut(state.cursor) {
                     line.is_selected = !line.is_selected;
+
+                    // if line.is_selected {
+                        
+                    //     state.asm_lines.insert(
+                    //         line.line_number,
+                    //         code_file.get_asm(&( (state.cursor+1) as u32),obj_path)
+                    //         );
+                    // }
+
                 } else {
                     unreachable!();
                 }
@@ -347,9 +284,9 @@ pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
 }
 
 // Helper function to create a line without a line number and styling
-fn asm_create_line<'a>(line: &'a Line,show_lines:bool) -> ListItem<'a> {
+fn create_line<'a>(line: &'a Line,show_lines:bool) -> ListItem<'a> {
     let line_style = if line.is_selected {
-        Style::default()//.fg(Color::Red)
+        Style::default().fg(Color::Red)
     } else {
         Style::default()
     };
@@ -366,6 +303,8 @@ fn asm_create_line<'a>(line: &'a Line,show_lines:bool) -> ListItem<'a> {
     let line_content_span = Span::styled(line.content.clone(), line_style);
     ListItem::new(Spans::from(vec![line_number_span, line_content_span]))
 }
+
+
 
 pub fn render_file_asm_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -408,7 +347,7 @@ pub fn render_file_asm_viewer(
             // .enumerate()
             .map(|line| {
                 // let asm_list = make_assembly_inner(code_file.get_asm(&(line.line_number as u32),obj_path.clone()));
-                asm_create_line(line,state.show_lines)//,asm_list)
+                create_line(line,state.show_lines)//,asm_list)
             })
             .collect();
 
@@ -429,22 +368,25 @@ pub fn render_file_asm_viewer(
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
 
-        let asm_list = make_assembly_inner(
-            code_file.get_asm(&( (state.cursor+1) as u32),obj_path),
+        let asm_list = List::new(make_assembly_inner(
+            code_file.get_asm(&( (state.cursor+1) as u32),obj_path).map(|x| x.iter()),
             state
-            );
+            ));
         f.render_widget(asm_list.block(asm_block), layout[1]);
     })?;
     Ok(())
 }
 
-fn make_assembly_inner<'a>(op:Option<&'a [InstructionDetail]>,state:&'a mut State) -> List<'a>{
+fn make_assembly_inner<'a, I>(op:Option<I>,state: &State) -> Vec<ListItem<'a>>
+ where I: Iterator<Item = &'a InstructionDetail> ,
+ {
     match op {
         Some(instructions) => {
             let mut prev = -1isize;
-            let mut asm_items = Vec::with_capacity(instructions.len());
+            let mut asm_items = Vec::new();
+            // let mut asm_items = Vec::with_capacity(instructions.len());
 
-            for ins in instructions.iter().skip(state.asm_cursor) {
+            for ins in instructions.skip(state.asm_cursor) {
                 if ins.serial_number as isize != prev+1{
                     asm_items.push(
                         ListItem::new(
@@ -461,18 +403,20 @@ fn make_assembly_inner<'a>(op:Option<&'a [InstructionDetail]>,state:&'a mut Stat
                     ins.address,
                     ins.mnemonic,
                     ins.op_str,
-                );
+                ).to_string();
 
                 asm_items.push(ListItem::new(vec![Spans::from(formatted_instruction)])
                         .style(Style::default().fg(Color::Cyan)))
 
             }
 
-            List::new(asm_items)
+            // List::new(asm_items)
+            asm_items
         },
         None => {
-            let error_msg = vec![ListItem::new(Spans::from("No assembly instructions for this line."))];
-            List::new(error_msg)
+            // let error_msg = vec![ListItem::new(Spans::from("No assembly instructions for this line."))];
+            // List::new(error_msg)
+            vec![ListItem::new(Spans::from("No assembly instructions for this line."))]
         }
     }
 }
