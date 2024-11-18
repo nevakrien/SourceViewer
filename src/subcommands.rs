@@ -1,4 +1,5 @@
 
+use crate::program_context::CodeFile;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::Path;
@@ -45,26 +46,28 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
 
     let mut terminal = create_terminal()?;
     let _cleanup = TerminalCleanup;
-    let mut state = State::new();
+    let mut state = State::start()?;
+
 
     state.dir_list_state.select(Some(0)); // Initialize the selected index
 
     loop {
         match state.mode {
             Mode::Dir => {
-                let entries: Vec<_> = fs::read_dir(&state.current_dir)?
-                    .filter_map(Result::ok)
-                    .collect();
-                render_directory(&mut terminal, &entries, &mut state)?;
-                if handle_directory_input(&entries, &mut state)? {
+                // let entries: Vec<_> = fs::read_dir(&state.current_dir)?
+                //     .filter_map(Result::ok)
+                //     .collect();
+                render_directory(&mut terminal, &mut state)?;
+                if handle_directory_input(&mut state)? {
                     break;
                 }
             }
             Mode::File => {
-                let path =  fs::canonicalize(Path::new(&state.file_path))?.into();
-                let file = code_files.get_source_file(path)?;
+                let path :Arc<Path>=  fs::canonicalize(Path::new(&state.file_path))?.into();
 
-                render_file_asm_viewer(&mut terminal, &mut state,file,obj_file.clone())?;
+                let code_file = code_files.get_source_file(path.clone())?;
+
+                render_file_asm_viewer(&mut terminal, &mut state,code_file,obj_file.clone())?;
                 if handle_file_input(&mut state)? {
                     break;
                 }

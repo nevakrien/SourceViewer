@@ -186,24 +186,27 @@ impl CodeFile {
     }
 }
 
-pub struct CodeRegistry<'a,'b> {
+pub struct CodeRegistry<'data,'r> {
     pub source_files :HashMap<Arc<Path>,Result<CodeFile,Box<WrapedError>>>,
-    asm:&'b mut AsmRegistry<'a>
+    asm:&'r mut AsmRegistry<'data>
     // pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
 }
 
 
-pub fn make_context<'a>(machine_file:&mut MachineFile<'a>) -> Result<Context<EndianSlice<'a,RunTimeEndian>>,Box<dyn Error>> {
+pub fn make_context<'data>(machine_file:&mut MachineFile<'data>) -> Result<Context<EndianSlice<'data,RunTimeEndian>>,Box<dyn Error>> {
     Ok(Context::from_arc_dwarf(machine_file.load_dwarf()?)?)
 }
 
-impl<'a,'b> CodeRegistry<'a,'b> {
-    pub fn new(asm:&'b mut AsmRegistry<'a>) -> Self {
+impl<'data,'r> CodeRegistry<'data,'r> {
+    pub fn new(asm:&'r mut AsmRegistry<'data>) -> Self {
         CodeRegistry {
             asm,
             source_files : HashMap::new(),
         }
+    }
+    pub fn get_existing_source_file<'me>(&'me self,path : &Arc<Path>) -> Result<&'me CodeFile,Box<dyn Error>>{
+        self.source_files.get(path).unwrap().as_ref().map_err(|e| e.clone().into())
     }
 
     pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&mut CodeFile,Box<dyn Error>>{
@@ -345,7 +348,7 @@ impl<'a,'b> CodeRegistry<'a,'b> {
     //     }
     // }
 
-    pub fn visit_machine_file(&mut self,path : Arc<Path>) -> Result<&mut MachineFile<'a>,Box<dyn Error>>{
+    pub fn visit_machine_file(&mut self,path : Arc<Path>) -> Result<&mut MachineFile<'data>,Box<dyn Error>>{
         self.asm.get_machine(path)
     }
 }
