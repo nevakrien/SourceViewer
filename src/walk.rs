@@ -188,7 +188,7 @@ pub fn load_file(state:&mut State,path:&PathBuf) -> Result<(), Box<dyn std::erro
 
 pub fn render_file_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    state: &mut State,  // Pass state as mutable
+    state: &mut State,
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
         let size = f.size();
@@ -327,7 +327,7 @@ pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
 }
 
 // Helper function to create a line without a line number and styling
-fn asm_create_line(line: &Line,_line_index:usize,show_lines:bool) -> ListItem {
+fn asm_create_line<'a>(line: &'a Line,show_lines:bool) -> ListItem<'a> {
     let line_style = if line.is_selected {
         Style::default()//.fg(Color::Red)
     } else {
@@ -350,7 +350,7 @@ fn asm_create_line(line: &Line,_line_index:usize,show_lines:bool) -> ListItem {
 pub fn render_file_asm_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut State,
-    code_file: &CodeFile, // Use Option for CodeFile reference
+    code_file: &CodeFile,
     obj_path: Arc<Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
@@ -383,10 +383,10 @@ pub fn render_file_asm_viewer(
             .iter()
             .skip(state.file_scroll)
             .take(max_visible_lines)
-            .enumerate()
-            .map(|(i, line)| {
-                let line_index = state.file_scroll + i;
-                asm_create_line(line,line_index,state.show_lines)
+            // .enumerate()
+            .map(|line| {
+                // let asm_list = make_assembly_inner(code_file.get_asm(&(line.line_number as u32),obj_path.clone()));
+                asm_create_line(line,state.show_lines)//,asm_list)
             })
             .collect();
 
@@ -407,36 +407,8 @@ pub fn render_file_asm_viewer(
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
 
-        let asm_list = make_assembly_inner(code_file.get_asm(&(state.cursor as u32),obj_path));
+        let asm_list = make_assembly_inner(code_file.get_asm(&( (state.cursor+1) as u32),obj_path));
         f.render_widget(asm_list.block(asm_block), layout[1]);
-
-        // if let Some(instructions) = code_file.get_asm(&(state.cursor as u32),obj_path) {
-        //     // Render instructions for the current line
-        //     let asm_items: Vec<ListItem> = instructions
-        //         .iter()
-        //         .map(|instruction| {
-
-        //             let formatted_instruction = format!(
-        //                 "{:#010x}: {:<6} {:<30}",
-        //                 instruction.address,
-        //                 instruction.mnemonic,
-        //                 instruction.op_str,
-        //             );
-
-        //             ListItem::new(vec![Spans::from(formatted_instruction)])
-        //                 .style(Style::default().fg(Color::Cyan))
-        //         })
-        //         .collect();
-
-        //     let asm_list = List::new(asm_items).block(asm_block);
-        //     f.render_widget(asm_list, layout[1]);
-        // } else {
-        //     // Display a message if there are no instructions for the selected line
-        //     let error_msg = vec![ListItem::new(Spans::from("No assembly instructions for this line."))];
-        //     let error_list = List::new(error_msg).block(asm_block);
-        //     f.render_widget(error_list, layout[1]);
-        // }
-        
     })?;
     Ok(())
 }
@@ -444,21 +416,47 @@ pub fn render_file_asm_viewer(
 fn make_assembly_inner(op:Option<&[InstructionDetail]>) -> List{
     match op {
         Some(instructions) => {
-            let asm_items: Vec<ListItem> = instructions
-                .iter()
-                .map(|instruction| {
+            let mut prev = -1isize;
+            let mut asm_items = Vec::with_capacity(instructions.len());
 
-                    let formatted_instruction = format!(
-                        "{:#010x}: {:<6} {:<30}",
-                        instruction.address,
-                        instruction.mnemonic,
-                        instruction.op_str,
-                    );
+            for ins in instructions {
+                if ins.serial_number as isize != prev+1{
+                    asm_items.push(
+                        ListItem::new(
+                        vec![Spans::from("DETATCH")]
+                        )
+                        .style(Style::default().fg(Color::Red))
+                    )
+            
+                }
+                prev = ins.serial_number as isize;
+                let formatted_instruction = format!(
+                    "{:#010x}: {:<6} {:<30}",
+                    ins.address,
+                    ins.mnemonic,
+                    ins.op_str,
+                );
 
-                    ListItem::new(vec![Spans::from(formatted_instruction)])
-                        .style(Style::default().fg(Color::Cyan))
-                })
-                .collect();
+                asm_items.push(ListItem::new(vec![Spans::from(formatted_instruction)])
+                        .style(Style::default().fg(Color::Cyan)))
+
+            }
+
+            // let asm_items: Vec<ListItem> = instructions
+            //     .iter()
+            //     .map(|instruction| {
+
+            //         let formatted_instruction = format!(
+            //             "{:#010x}: {:<6} {:<30}",
+            //             instruction.address,
+            //             instruction.mnemonic,
+            //             instruction.op_str,
+            //         );
+
+            //         ListItem::new(vec![Spans::from(formatted_instruction)])
+            //             .style(Style::default().fg(Color::Cyan))
+            //     })
+            //     .collect();
 
             List::new(asm_items)
         },
@@ -468,3 +466,31 @@ fn make_assembly_inner(op:Option<&[InstructionDetail]>) -> List{
         }
     }
 }
+
+// fn make_assembly_inner(op:Option<&[InstructionDetail]>) -> List{
+//     match op {
+//         Some(instructions) => {
+//             let asm_items: Vec<ListItem> = instructions
+//                 .iter()
+//                 .map(|instruction| {
+
+//                     let formatted_instruction = format!(
+//                         "{:#010x}: {:<6} {:<30}",
+//                         instruction.address,
+//                         instruction.mnemonic,
+//                         instruction.op_str,
+//                     );
+
+//                     ListItem::new(vec![Spans::from(formatted_instruction)])
+//                         .style(Style::default().fg(Color::Cyan))
+//                 })
+//                 .collect();
+
+//             List::new(asm_items)
+//         },
+//         None => {
+//             let error_msg = vec![ListItem::new(Spans::from("No assembly instructions for this line."))];
+//             List::new(error_msg)
+//         }
+//     }
+// }

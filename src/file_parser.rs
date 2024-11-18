@@ -57,6 +57,8 @@ pub struct InfoSection<'a> {
 
 #[derive(Clone,Debug,PartialEq)]
 pub struct InstructionDetail {
+    pub serial_number:usize,
+
     pub address: u64,
     pub mnemonic: Box<str>,
     pub op_str: String,
@@ -140,8 +142,9 @@ impl<'a> MachineFile<'a> {
                 // Disassemble executable sections
                 let disasm = cs.disasm_all(section_data, section.address())?;
                 let mut instructions = Vec::new();
-                for insn in disasm.iter() {
+                for (serial_number,insn) in disasm.iter().enumerate() {
                     instructions.push(InstructionDetail {
+                        serial_number,
                         address: insn.address(),
                         mnemonic: insn.mnemonic().unwrap_or("unknown").to_owned().into_boxed_str(),
                         op_str: insn.op_str().unwrap_or("unknown").to_owned(),
