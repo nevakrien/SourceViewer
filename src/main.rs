@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Command::new("walk")
                 .about("looks at the source code files next to assembly")
                 .arg(
-                    Arg::new("FILE") // Renamed to singular "FILE" for clarity
+                    Arg::new("BIN")
                         .help("Input binary/object file to process")
                         .required(true) // Ensure it is required
                         .num_args(1) // Expect exactly one argument
@@ -28,7 +28,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Command::new("sections")
                 .about("Dumps sections information for each file")
                 .arg(
-                    Arg::new("FILES")
+                    Arg::new("BINS")
                         .help("Input binary/object files to process")
                         .required(true)
                         .num_args(1..) // Allows multiple file paths
@@ -40,7 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Command::new("lines")
                 .about("Annotates assembly instructions with source information")
                 .arg(
-                    Arg::new("FILES")
+                    Arg::new("BINS")
                         .help("Input binary/object files to process")
                         .required(true)
                         .num_args(1..) // Allows multiple file paths
@@ -113,7 +113,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             Command::new("dwarf_dump")
                 .about(description)
                 .arg(
-                    Arg::new("FILES")
+                    Arg::new("BINS")
                         .help("Input binary/object files to process")
                         .required(true)
                         .num_args(1..) // Allows multiple file paths

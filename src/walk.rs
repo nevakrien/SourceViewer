@@ -456,7 +456,8 @@ fn make_assembly_inner<'a>(op:Option<&'a [InstructionDetail]>,state:&'a mut Stat
                 }
                 prev = ins.serial_number as isize;
                 let formatted_instruction = format!(
-                    "{:#010x}: {:<6} {:<30}",
+                    "{:<4} {:#010x}: {:<6} {:<30}",
+                    ins.serial_number,
                     ins.address,
                     ins.mnemonic,
                     ins.op_str,

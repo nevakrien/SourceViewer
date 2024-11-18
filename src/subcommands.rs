@@ -29,8 +29,8 @@ use crate::program_context::map_instructions_to_source;
 
 pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
     let file_path: PathBuf = matches
-    .get_one::<PathBuf>("FILE") // Use `get_one` instead of `get_many`
-    .expect("FILE argument is required")
+    .get_one::<PathBuf>("BIN") // Use `get_one` instead of `get_many`
+    .ok_or("BIN argument is required")?
     .into(); // No need for `collect`, just convert directly to `PathBuf`
     let obj_file :Arc<Path>= file_path.into();
 
@@ -79,8 +79,8 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
 pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `lines` command
     let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("FILES")
-        .ok_or("FILES argument is required")? 
+        .get_many::<PathBuf>("BINS")
+        .ok_or("BINS argument is required")? 
         .cloned()
         .collect();
 
@@ -148,8 +148,8 @@ fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) {
 pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `sections` command
     let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("FILES")
-        .ok_or("FILES argument is required")?
+        .get_many::<PathBuf>("BINS")
+        .ok_or("BINS argument is required")?
         .cloned()
         .collect();
 
@@ -173,8 +173,8 @@ pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Erro
 pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `sections` command
     let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("FILES")
-        .ok_or("FILES argument is required")?
+        .get_many::<PathBuf>("BINS")
+        .ok_or("BINS argument is required")?
         .cloned()
         .collect();
 
