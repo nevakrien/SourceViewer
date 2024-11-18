@@ -375,20 +375,22 @@ pub fn render_file_asm_viewer(
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
         let size = f.size();
-        let max_visible_lines = size.height.saturating_sub(4) as usize;
-
-        // Adjust `file_scroll` to keep `cursor` within the visible range
-        if state.cursor < state.file_scroll {
-            state.file_scroll = state.cursor;
-        } else if state.cursor >= state.file_scroll + max_visible_lines {
-            state.file_scroll = state.cursor - max_visible_lines + 1;
-        }
 
         // Layout: Split vertically for source and assembly (if selected)
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)].as_ref())
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
             .split(size);
+
+        // Calculate max visible lines based on the height of the first part of the layout
+        let max_visible_lines = layout[0].height.saturating_sub(2) as usize;
+
+        // Adjust `file_scroll` to keep `cursor` within the visible range for the first layout section
+        if state.cursor < state.file_scroll {
+            state.file_scroll = state.cursor; // Scroll up
+        } else if state.cursor >= state.file_scroll + max_visible_lines {
+            state.file_scroll = state.cursor - max_visible_lines + 1; // Scroll down
+        }
 
         // Source file block
         let file_block = Block::default()
