@@ -11,29 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .version("0.1")
         .author("Neva Krien")
         .about("A tool for viewing assembly and source information in binary files")
-        .subcommand(
-            Command::new("lines")
-                .about("Annotates assembly instructions with source information")
-                .arg(
-                    Arg::new("FILES")
-                        .help("Input binary/object files to process")
-                        .required(true)
-                        .num_args(1..) // Allows multiple file paths
-                        .value_parser(clap::value_parser!(PathBuf)),
-                ),
-        )
-        .subcommand(
-            Command::new("sections")
-                .about("Dumps sections information for each file")
-                .arg(
-                    Arg::new("FILES")
-                        .help("Input binary/object files to process")
-                        .required(true)
-                        .num_args(1..) // Allows multiple file paths
-                        .value_parser(clap::value_parser!(PathBuf)),
-                ),
-        )
-
+        
         .subcommand(
             Command::new("walk")
                 .about("looks at the source code files next to assembly")
@@ -47,8 +25,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
 
         .subcommand(
-            Command::new("view_source")
-                .about("looks at the source code files")
+            Command::new("sections")
+                .about("Dumps sections information for each file")
                 .arg(
                     Arg::new("FILES")
                         .help("Input binary/object files to process")
@@ -58,7 +36,57 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ),
         )
 
-        
+        .subcommand(
+            Command::new("lines")
+                .about("Annotates assembly instructions with source information")
+                .arg(
+                    Arg::new("FILES")
+                        .help("Input binary/object files to process")
+                        .required(true)
+                        .num_args(1..) // Allows multiple file paths
+                        .value_parser(clap::value_parser!(PathBuf)),
+                ),
+        )
+
+
+        .subcommand(
+            Command::new("view_source")
+                .about("looks at the source code files that made the binary")
+                .arg(
+                    Arg::new("BIN")
+                        .help("Input binary/object file to process")
+                        .required(true)
+                        .num_args(1) // Ensures only a single input file
+                        .value_parser(clap::value_parser!(PathBuf)),
+                )
+                .arg(
+                    Arg::new("all")
+                        .short('a')
+                        .long("all")
+                        .help("Show all source files")
+                        .action(clap::ArgAction::SetTrue), // Sets the flag as a binary on/off
+                )
+                .arg(
+                    Arg::new("SELECTIONS")
+                        .help("Specific indices or file paths to display")
+                        .required(false)
+                        .num_args(0..) // Allows zero or more additional arguments
+                        .value_parser(clap::builder::ValueParser::new(|s: &str| {
+                            if let Ok(index) = s.parse::<usize>() {
+                                Ok(FileSelection::Index(index))
+                            } else {
+                                let path = std::fs::canonicalize(PathBuf::from(s))
+                                .map_err(|e| format!("Error canonicalizing path {}: {}", s, e))?;
+                                if path.exists() {
+                                    Ok(FileSelection::Path(path))
+                                } else {
+                                    Err(format!("'{}' is not a valid index or existing path", s))
+                                }
+                            }
+                        }))
+                ),
+
+            )
 
 
         .subcommand(

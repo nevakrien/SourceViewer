@@ -1,4 +1,5 @@
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeRegistry;
@@ -79,7 +80,7 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     // Collect all file paths provided by the user for the `lines` command
     let file_paths: Vec<PathBuf> = matches
         .get_many::<PathBuf>("FILES")
-        .expect("FILES argument is required") 
+        .ok_or("FILES argument is required")? 
         .cloned()
         .collect();
 
@@ -148,7 +149,7 @@ pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Erro
     // Collect all file paths provided by the user for the `sections` command
     let file_paths: Vec<PathBuf> = matches
         .get_many::<PathBuf>("FILES")
-        .expect("FILES argument is required")
+        .ok_or("FILES argument is required")?
         .cloned()
         .collect();
 
@@ -173,7 +174,7 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
     // Collect all file paths provided by the user for the `sections` command
     let file_paths: Vec<PathBuf> = matches
         .get_many::<PathBuf>("FILES")
-        .expect("FILES argument is required")
+        .ok_or("FILES argument is required")?
         .cloned()
         .collect();
 
@@ -227,70 +228,106 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
+#[derive(Debug,Clone)]
+pub enum FileSelection {
+    Index(usize),
+    Path(PathBuf),
+}
+
+
+
+
+
 pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
-    // Collect all file paths provided by the user for the `view_source` command
-    let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("FILES")
-        .expect("FILES argument is required")
-        .cloned()
-        .collect();
+    // Collect the binary path from the `BIN` argument
+    let file_path = matches.get_one::<PathBuf>("BIN").ok_or("BIN argument is required")?;
 
+    // Check if the `-a` flag is set
+    let set_flag = matches.get_flag("all");
 
-    // Initialize a basic editor interface
-    // TODO: Use a library like `crossterm` to set up the interface
-    // For now, placeholder logic to prompt file selection
-    let mut filemaps: Vec<AddressFileMapping> = Vec::new();
-    let mut source_files: HashSet<String> = HashSet::new();
+    // Gather selections (either indices or paths)
+    let selections: Vec<_> = matches.get_many::<FileSelection>("SELECTIONS").unwrap_or_default().collect();
 
+    // Load and parse the binary
+    let buffer = fs::read(file_path)?;
+    let mut machine_file = MachineFile::parse(&buffer)?;
+    let map = map_instructions_to_source(&mut machine_file)?;
 
-    // Load files into registry
-    for file_path in file_paths {
-        println!("{}", format!("Loading file {:?}", file_path).green().bold());
-        // registry.add_file(file_path.clone())?;
+    // Populate a unique list of source files in the order they appear
+    let mut source_files: Vec<String> = Vec::new();
+    let mut source_files_map: HashMap<String, usize> = HashMap::new();
 
-        let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer)?;
-
-        let map = map_instructions_to_source(&mut machine_file)?;
-        for (s,_) in map.values() {
-            source_files.insert(s.to_string());
+    for (source, _) in map.values() {
+        // Add to source files if not already added
+        if !source_files_map.contains_key(source) {
+            let index = source_files.len();
+            source_files.push(source.to_string());
+            source_files_map.insert(source.to_string(), index);
         }
-        filemaps.push(map);
     }
 
-
-
+    // Display source files with their indices
     println!("Source files:");
     for (index, file) in source_files.iter().enumerate() {
         println!("{}: {:?}", index, file);
     }
 
-    // Placeholder to simulate user selecting a file
-    for file_name in source_files.iter() {
-        let file :PathBuf= match fs::canonicalize(Path::new(file_name)) {
-            Ok(file) =>file,
-            Err(_) => {
-                println!("{}",format!("{:?} does not exist",file_name ).red());
-                continue;
-            },
-        };
+    // Collect files to display based on the selections or `-a` flag
+    let mut files_to_display: Vec<&String> = Vec::new();
 
-        match std::fs::read_to_string(&file) {
+    if set_flag {
+        // Add all files if `-a` is set
+        files_to_display.extend(source_files.iter());
+    } else {
+        // Add files based on selections
+        for selection in selections.iter() {
+            match selection {
+                FileSelection::Index(i) => {
+                    if let Some(file) = source_files.get(*i) {
+                        files_to_display.push(file);
+                    } else {
+                        println!("{}", format!("Index {} is out of bounds", i).red());
+                    }
+                }
+                FileSelection::Path(path) => {
+                    let path_str = path.to_string_lossy().to_string();
+                    if let Some(&index) = source_files_map.get(&path_str) {
+                        files_to_display.push(&source_files[index]);
+                    } else {
+                        println!("{}", format!("Path {:?} is not included in the binary", path).red());
+                    }
+                }
+            }
+        }
+    }
+
+    // Display the contents of each file in `files_to_display`
+    for file in files_to_display {
+        display_file_contents(file)?;
+    }
+
+    Ok(())
+}
+
+
+// Helper function to display the contents of a file with line numbers
+fn display_file_contents(file_name: &str) -> Result<(), Box<dyn Error>> {
+    let file_path = Path::new(file_name);
+    match fs::canonicalize(file_path) {
+        Ok(file) => match fs::read_to_string(&file) {
             Ok(source_text) => {
-                // Display the source text
                 println!("Contents of {:?}:", file);
                 for (i, line) in source_text.lines().enumerate() {
                     println!("{:4} {}", i + 1, line);
                 }
             }
             Err(e) => {
-                println!("{} reading {:?}: {}","FAILED".red(), file,e);
-
+                println!("{} reading {:?}: {}", "FAILED".red(), file, e);
             }
+        },
+        Err(_) => {
+            println!("{}", format!("{:?} does not exist", file_name).red());
         }
-
-        
     }
-
     Ok(())
 }
