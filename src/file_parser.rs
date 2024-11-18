@@ -1,3 +1,5 @@
+use std::collections::hash_map;
+use std::collections::btree_map;
 use std::collections::HashMap;
 use std::path::Path;
 use std::collections::BTreeMap;
@@ -11,8 +13,43 @@ use capstone::prelude::*;
 use gimli::{read::Dwarf, SectionId, EndianSlice};
 use std::error::Error;
 
-pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
-pub type FileMap = HashMap<Arc<Path>,LineMap>;
+// pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
+// pub type FileMap = HashMap<Arc<Path>,LineMap>;
+
+#[derive(Debug,Default)]
+pub struct LineMap{
+    inner: BTreeMap<u32,Vec<InstructionDetail>>,
+    extra: Vec<InstructionDetail>
+}
+
+impl LineMap {
+    #[inline(always)]
+    pub fn get(&self,id:&u32) -> Option<&Vec<InstructionDetail>>{
+        self.inner.get(id)
+    }
+
+    #[inline(always)]
+    pub fn iter_maped(&self) -> btree_map::Iter<u32,Vec<InstructionDetail>>{
+        self.inner.iter()
+    }
+}
+
+#[derive(Debug,Default)]
+pub struct FileMap {
+    inner: HashMap<Arc<Path>,LineMap>,
+    extra: Vec<InstructionDetail>
+}
+
+impl FileMap {
+    #[inline(always)]
+    pub fn get(&self,id:&Arc<Path>) -> Option<&LineMap> {
+        self.inner.get(id)
+    }
+
+    // fn entry(&mut self,id:Arc<Path>) -> hash_map::Entry<'_,Arc<Path>,LineMap> {
+    //     self.inner.entry(id)
+    // }
+}
 
 #[derive(Debug)]
 pub struct  MachineFileInner<'a> {
@@ -77,7 +114,8 @@ impl<'a> MachineFile<'a> {
         let dwarf = self.load_dwarf()?;
         let context = addr2line::Context::from_arc_dwarf(dwarf)?;
 
-        let mut ans = Arc::new(HashMap::new());
+        // let mut ans = Arc::new(HashMap::new());
+        let mut ans = Arc::new(FileMap::default());
         let handle = Arc::get_mut(&mut ans).unwrap();
 
         for instruction in self.sections.iter()
@@ -91,17 +129,31 @@ impl<'a> MachineFile<'a> {
             .flat_map(|instructions| instructions.iter())
         {
             if let Ok(Some(loc))= context.find_location(instruction.address){
-                if let (Some(file_name),Some(line)) = (loc.file,loc.line){
-                    let file = Path::new(file_name).into();
-                    
-                    handle.entry(file)
-                    .or_insert(BTreeMap::new())
-                    .entry(line)
-                    .or_insert(Vec::new())
-                    .push(instruction.clone());
+                
+                match (loc.file,loc.line){
+                    (Some(file_name),Some(line)) =>{
+                        let file = Path::new(file_name).into();
+                        
+                        handle.inner.entry(file)
+                        .or_default()
+                        .inner.entry(line)
+                        .or_default()
+                        .push(instruction.clone());
+                    },
+                    (Some(file_name), None) =>{
+                        let file = Path::new(file_name).into();
+                        
+                        handle.inner.entry(file)
+                        .or_default()
+                        .extra
+                        .push(instruction.clone());
 
 
+                    },
+                    (None, _) => todo!(),
                 }
+            } else {
+                handle.extra.push(instruction.clone())
             }
         }
 

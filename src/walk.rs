@@ -442,22 +442,6 @@ fn make_assembly_inner(op:Option<&[InstructionDetail]>) -> List{
 
             }
 
-            // let asm_items: Vec<ListItem> = instructions
-            //     .iter()
-            //     .map(|instruction| {
-
-            //         let formatted_instruction = format!(
-            //             "{:#010x}: {:<6} {:<30}",
-            //             instruction.address,
-            //             instruction.mnemonic,
-            //             instruction.op_str,
-            //         );
-
-            //         ListItem::new(vec![Spans::from(formatted_instruction)])
-            //             .style(Style::default().fg(Color::Cyan))
-            //     })
-            //     .collect();
-
             List::new(asm_items)
         },
         None => {
@@ -466,31 +450,3 @@ fn make_assembly_inner(op:Option<&[InstructionDetail]>) -> List{
         }
     }
 }
-
-// fn make_assembly_inner(op:Option<&[InstructionDetail]>) -> List{
-//     match op {
-//         Some(instructions) => {
-//             let asm_items: Vec<ListItem> = instructions
-//                 .iter()
-//                 .map(|instruction| {
-
-//                     let formatted_instruction = format!(
-//                         "{:#010x}: {:<6} {:<30}",
-//                         instruction.address,
-//                         instruction.mnemonic,
-//                         instruction.op_str,
-//                     );
-
-//                     ListItem::new(vec![Spans::from(formatted_instruction)])
-//                         .style(Style::default().fg(Color::Cyan))
-//                 })
-//                 .collect();
-
-//             List::new(asm_items)
-//         },
-//         None => {
-//             let error_msg = vec![ListItem::new(Spans::from("No assembly instructions for this line."))];
-//             List::new(error_msg)
-//         }
-//     }
-// }

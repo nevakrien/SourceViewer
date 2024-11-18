@@ -239,7 +239,7 @@ impl<'a,'b> CodeRegistry<'a,'b> {
                     };
 
                     if let Some(line_map) = map.get(&path){
-                        for (line,v) in line_map {
+                        for (line,v) in line_map.iter_maped() {
                             let spot = code_file.asm
                             .entry(*line)
                             .or_insert(HashMap::new())
