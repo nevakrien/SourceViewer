@@ -37,11 +37,15 @@ pub struct State {
     pub dir_list_state: ListState,
     pub mode: Mode,
     pub file_content: Vec<Line>,
+    
     pub file_scroll: usize,
     pub cursor: usize,
     pub file_path: String,
 
-    pub show_lines: bool
+    pub show_lines: bool,
+
+    pub asm_cursor: usize,
+
 }
 
 impl Default for State {
@@ -63,6 +67,8 @@ impl State {
             file_path: String::new(),
 
             show_lines: false,
+
+            asm_cursor:0,
         }
     }
 }
@@ -271,7 +277,7 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
         match code {
             KeyCode::Char('q') => return Ok(true),
 
-            KeyCode::Up | KeyCode::Char('w') => {
+            KeyCode::Up  => {
                 if state.cursor > 0 {
                     state.cursor -= 1;
 
@@ -279,10 +285,22 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
                     if state.cursor < state.file_scroll {
                         state.file_scroll = state.cursor;
                     }
+
+                    state.asm_cursor=0;
                 }
             }
 
-            KeyCode::Down | KeyCode::Char('s') => {
+            KeyCode::Char('w') => {
+                if state.asm_cursor > 0 {
+                    state.asm_cursor-=1;
+                }
+            }
+
+            KeyCode::Char('s') => {
+                state.asm_cursor+=1;
+            }
+
+            KeyCode::Down  => {
                 if state.cursor < state.file_content.len().saturating_sub(1) {
                     state.cursor += 1;
 
@@ -292,6 +310,8 @@ pub fn handle_file_input(state: &mut State) -> Result<bool, io::Error> {
                         state.file_scroll = state.cursor - max_visible_lines + 1;
                     }
                 }
+
+                state.asm_cursor=0;
             },
 
             KeyCode::Enter => {
@@ -407,19 +427,22 @@ pub fn render_file_asm_viewer(
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
 
-        let asm_list = make_assembly_inner(code_file.get_asm(&( (state.cursor+1) as u32),obj_path));
+        let asm_list = make_assembly_inner(
+            code_file.get_asm(&( (state.cursor+1) as u32),obj_path),
+            state
+            );
         f.render_widget(asm_list.block(asm_block), layout[1]);
     })?;
     Ok(())
 }
 
-fn make_assembly_inner(op:Option<&[InstructionDetail]>) -> List{
+fn make_assembly_inner<'a>(op:Option<&'a [InstructionDetail]>,state:&'a mut State) -> List<'a>{
     match op {
         Some(instructions) => {
             let mut prev = -1isize;
             let mut asm_items = Vec::with_capacity(instructions.len());
 
-            for ins in instructions {
+            for ins in instructions.iter().skip(state.asm_cursor) {
                 if ins.serial_number as isize != prev+1{
                     asm_items.push(
                         ListItem::new(
