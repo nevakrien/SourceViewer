@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::sync::Arc;
 use std::path::Path;
@@ -34,40 +35,58 @@ pub enum Mode {
 }
 
 pub struct GlobalState {
-    pub current_dir: PathBuf,
-    pub original_dir: PathBuf,
+    current_dir: PathBuf,
+    original_dir: PathBuf,
     pub dir_list_state: ListState,
-    pub dir_entries: Box<[std::fs::DirEntry]>,
+    dir_entries: Box<[std::fs::DirEntry]>,
 
-    pub show_lines: bool,
+    show_lines: bool,
 
 }
 
-pub struct FileState<'a> {
+pub struct FileState<'arena> {
 
     // pub current_dir: PathBuf,
     // pub original_dir: PathBuf,
     // pub dir_list_state: ListState,
     // pub mode: Mode,
-    pub file_content: Vec<Line>,
+    file_content: Vec<Line<'arena>>,
     
 
-    pub file_scroll: usize,
-    pub cursor: usize,
+    file_scroll: usize,
+    cursor: usize,
     pub file_path: String,
 
 
-    pub asm_cursor: usize,
-    pub global: &'a mut GlobalState,
+    asm_cursor: usize,
+    global: &'arena mut GlobalState,
 
-    //wish i could do
-    // pub asm_lines: BTreeMap<usize,Option<&'a [InstructionDetail]>>
-    //but for the life of me cant figure out a cached hashmap like
-    //as it stands the borrow checker basically stops that
-    // pub asm_lines: BTreeMap<usize,Option<&'a [InstructionDetail]>>,
+    selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
 
 }
 
+impl<'arena> FileState<'arena> {
+    fn add_asm_line(&mut self,debug:Option<&'arena [InstructionDetail]>) {
+        match debug {
+            None=>{},
+            Some(data)=>{
+                self.selected_asm.extend(
+                data.iter().map(|x| 
+                    (x.address,x)
+                    )                
+                );
+            }
+        }
+        
+    }
+
+    fn remove_asm_line(&mut self,debug:Option<&'arena [InstructionDetail]>) {
+        for address in debug.unwrap_or_default().iter().map(|x| x.address){
+            self.selected_asm.remove(&address);
+        }
+        
+    }
+}
 
 impl GlobalState {
     pub fn start() -> Result<Self, Box<dyn std::error::Error>>  {
@@ -99,21 +118,35 @@ impl GlobalState {
 
 
 
-pub struct Line {
+struct Line<'data> {
     content: String,
     is_selected: bool,
     line_number: usize, // Optionally store the line number
+    debug_info: Option<Option<&'data [InstructionDetail]>>
     // debug_info: Option<String>,  // Placeholder for future debug information
 }
 
-impl Line {
+impl<'data> Line<'data> {
     fn new(content: String, line_number: usize) -> Self {
         Self {
             content,
             is_selected: false,
             line_number,
-            // debug_info: None,
+            debug_info: None,
         }
+    }
+
+    #[inline(always)]
+    fn load_debug(&mut self,code_file:&'data CodeFile,obj_path:Arc<Path>) -> Option<&'data [InstructionDetail]> {
+        match self.debug_info{
+            Some(x) => x,
+            None => {
+                self.debug_info = Some(code_file.get_asm(&(self.line_number as u32),obj_path));
+                self.debug_info.unwrap()
+
+            }
+        }
+
     }
 }
 
@@ -167,10 +200,10 @@ pub fn render_directory(
     Ok(())
 }
 
-pub enum DirResult<'a> {
+pub enum DirResult<'arena> {
     
     KeepGoing,
-    File(FileState<'a>),
+    File(FileState<'arena>),
     Exit
 }
 
@@ -223,16 +256,15 @@ pub fn handle_directory_input(
 
 
 
-pub fn load_file<'a>(global:&'a mut GlobalState, path:&PathBuf) -> Result<FileState<'a>, Box<dyn std::error::Error>> {
+pub fn load_file<'arena>(global:&'arena mut GlobalState, path:&PathBuf) -> Result<FileState<'arena>, Box<dyn std::error::Error>> {
     Ok(FileState{
-
-
     file_content :read_file_lines(path)?,
     file_path : path.display().to_string(),
     file_scroll : 0,
     cursor : 0,
     asm_cursor :0,
-    global
+    global,
+    selected_asm: BTreeMap::new(),
     })
 }
 
@@ -242,8 +274,8 @@ pub enum FileResult {
     Exit
 }
 
-//code_file: &'a CodeFile,obj_path: Arc<Path>
-pub fn handle_file_input<'a>(state: &mut FileState<'a>,code_file: &'a CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
+//code_file: &'arena CodeFile,obj_path: Arc<Path>
+pub fn handle_file_input<'arena>(state: &mut FileState<'arena>,code_file: &'arena CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
             KeyCode::Char('q') => return Ok(FileResult::Exit),
@@ -289,14 +321,15 @@ pub fn handle_file_input<'a>(state: &mut FileState<'a>,code_file: &'a CodeFile,o
                 // Toggle selection of the current line under the cursor
                 if let Some(line) = state.file_content.get_mut(state.cursor) {
                     line.is_selected = !line.is_selected;
+                    let info = line.load_debug(code_file,obj_path);
 
-                    // if line.is_selected {
+
+                    if line.is_selected{    
                         
-                    //     state.asm_lines.insert(
-                    //         line.line_number,
-                    //         code_file.get_asm(&( (state.cursor+1) as u32),obj_path)
-                    //         );
-                    // }
+                        state.add_asm_line(info)
+                    }else {
+                        state.remove_asm_line(info)
+                    }
 
                 } else {
                     unreachable!();
@@ -314,7 +347,7 @@ pub fn handle_file_input<'a>(state: &mut FileState<'a>,code_file: &'a CodeFile,o
 }
 
 
-pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
+fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line<'static>>> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
     Ok(reader.lines().map_while(Result::ok)
@@ -327,7 +360,7 @@ pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
 }
 
 // Helper function to create a line without a line number and styling
-fn create_line(line: &Line,show_lines:bool) -> ListItem<'_> {
+fn create_line<'a>(line: &Line,show_lines:bool) -> ListItem<'a> {
     let line_style = if line.is_selected {
         Style::default().fg(Color::Red)
     } else {
@@ -413,7 +446,8 @@ pub fn render_file_asm_viewer(
             ));
 
         let asm_list = List::new(make_assembly_inner(
-            code_file.get_asm(&( (state.cursor+1) as u32),obj_path).map(|x| x.iter()),
+            // code_file.get_asm(&( (state.cursor+1) as u32),obj_path).map(|x| x.iter()),
+            Some(state.selected_asm.values().map(|x| *x)),
             state
             ));
         f.render_widget(asm_list.block(asm_block), layout[1]);
@@ -422,13 +456,13 @@ pub fn render_file_asm_viewer(
 }
 
 fn make_assembly_inner<'a, I>(op:Option<I>,state: &FileState) -> Vec<ListItem<'a>>
- where I: Iterator<Item = &'a InstructionDetail> ,
+ where I: Iterator<Item = &'a InstructionDetail> + ExactSizeIterator ,
  {
     match op {
         Some(instructions) => {
             let mut prev = -1isize;
-            let mut asm_items = Vec::new();
-            // let mut asm_items = Vec::with_capacity(instructions.len());
+            // let mut asm_items = Vec::new();
+            let mut asm_items = Vec::with_capacity(instructions.len());
 
             for ins in instructions.skip(state.asm_cursor) {
                 if ins.serial_number as isize != prev+1{
