@@ -1,5 +1,4 @@
 
-use crate::program_context::CodeFile;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::Path;
@@ -8,10 +7,9 @@ use crate::walk::render_file_asm_viewer;
 use crate::walk::handle_file_input;
 use crate::walk::create_terminal;
 use crate::walk::TerminalCleanup;
-use crate::walk::{GlobalState, FileState,DirResult,FileResult};
+use crate::walk::{GlobalState,DirResult,FileResult};
 use crate::walk::render_directory;
 use crate::walk::handle_directory_input;
-use crate::walk::Mode;
 
 
 use crate::program_context::AsmRegistry;
@@ -58,9 +56,8 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
             DirResult::KeepGoing =>{},
             DirResult::Exit =>{return Ok(());},
             DirResult::File(mut f) =>{
-                 let path :Arc<Path>=  fs::canonicalize(Path::new(&f.file_path))?.into();
-
-                let code_file = code_files.get_source_file(path.clone())?;
+                let path :Arc<Path>=  fs::canonicalize(Path::new(&f.file_path))?.into();
+                let code_file = code_files.get_source_file(path)?;
                 loop {
                     render_file_asm_viewer(&mut terminal, &mut f,code_file,obj_file.clone())?;
                     match handle_file_input(&mut f,code_file,obj_file.clone())? {

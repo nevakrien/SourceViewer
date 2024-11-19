@@ -1,5 +1,4 @@
 use std::fs;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeFile;
@@ -169,6 +168,7 @@ pub fn render_directory(
 }
 
 pub enum DirResult<'a> {
+    
     KeepGoing,
     File(FileState<'a>),
     Exit
@@ -243,7 +243,7 @@ pub enum FileResult {
 }
 
 //code_file: &'a CodeFile,obj_path: Arc<Path>
-pub fn handle_file_input<'a>(state: &mut FileState,code_file: &'a CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
+pub fn handle_file_input<'a>(state: &mut FileState<'a>,code_file: &'a CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
             KeyCode::Char('q') => return Ok(FileResult::Exit),
@@ -327,7 +327,7 @@ pub fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line>> {
 }
 
 // Helper function to create a line without a line number and styling
-fn create_line<'a>(line: &'a Line,show_lines:bool) -> ListItem<'a> {
+fn create_line(line: &Line,show_lines:bool) -> ListItem<'_> {
     let line_style = if line.is_selected {
         Style::default().fg(Color::Red)
     } else {
