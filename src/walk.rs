@@ -1,5 +1,6 @@
 use core::cmp::min;
 use std::collections::BTreeMap;
+use std::collections::btree_map;
 use std::fs;
 use std::sync::Arc;
 use std::path::Path;
@@ -44,30 +45,14 @@ pub struct GlobalState<'arena> {
     show_lines: bool,
 
     selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
-    asm_cursor: usize,
+    // asm_cursor: usize,
+    cur_asm: u64,
 
 
-}
-
-pub struct FileState<'me,'arena> {
-
-    // pub current_dir: PathBuf,
-    // pub original_dir: PathBuf,
-    // pub dir_list_state: ListState,
-    // pub mode: Mode,
-    file_content: Vec<Line<'arena>>,
-    
-
-    file_scroll: usize,
-    cursor: usize,
-    pub file_path: String,
-
-
-    global: &'me mut GlobalState<'arena>,
-
-    // selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
 
 }
+
+
 
 
 impl<'arena> GlobalState<'arena> {
@@ -91,7 +76,8 @@ impl<'arena> GlobalState<'arena> {
             show_lines: false,
             selected_asm: BTreeMap::new(),
 
-            asm_cursor:0,
+            // asm_cursor:0,
+            cur_asm:0,
 
             // asm_lines: BTreeMap::default()
         })
@@ -116,13 +102,77 @@ impl<'arena> GlobalState<'arena> {
         for address in debug.unwrap_or_default().iter().map(|x| x.address){
             self.selected_asm.remove(&address);
         }
-        self.asm_cursor = min(self.asm_cursor,self.selected_asm.len());
+        self.cur_asm = min(self.cur_asm,
+            self.selected_asm
+            .last_key_value()
+            .map(|(k,_)| *k)
+            .unwrap_or_default()
+        );
         
     }
+
+     #[inline(always)]
+    fn cur_asm_range(&self) -> std::collections::btree_map::Range<'_, u64, &'arena InstructionDetail> {
+        // Start from asm_cursor and get all subsequent entries
+        self.selected_asm.range(self.cur_asm..)
+    }
+
+    #[inline]
+    fn asm_up(&mut self) {
+        // Move to the previous address if possible
+        if let Some(prev_address) = self.selected_asm.range(..self.cur_asm).next_back().map(|(addr, _)| *addr) {
+            self.cur_asm = prev_address;
+        }
+    }
+
+    #[inline]
+    fn asm_down(&mut self) {
+        // Move to the next address if possible
+        if let Some(next_address) = self.selected_asm.range((self.cur_asm + 1)..).next().map(|(addr, _)| *addr) {
+            self.cur_asm = next_address;
+        }
+    }
+
+    // #[inline(always)]
+    // fn cur_asm_range(&self)  -> impl Iterator<Item = &&InstructionDetail> {
+    //     self.selected_asm.iter().map(|(_,x)| x).skip(self.asm_cursor)
+    // }
+
+    // #[inline]
+    // fn asm_up(&mut self) {
+    //     if self.asm_cursor > 0 {
+    //         self.asm_cursor-=1;
+    //     }
+    // }
+
+    // #[inline]
+    // fn asm_down(&mut self) {
+    //     if self.asm_cursor < self.selected_asm.len().saturating_sub(1){
+    //         self.asm_cursor+=1;
+    //     }
+    // }
 }
 
 
+pub struct FileState<'me,'arena> {
 
+    // pub current_dir: PathBuf,
+    // pub original_dir: PathBuf,
+    // pub dir_list_state: ListState,
+    // pub mode: Mode,
+    file_content: Vec<Line<'arena>>,
+    
+
+    file_scroll: usize,
+    cursor: usize,
+    pub file_path: String,
+
+
+    global: &'me mut GlobalState<'arena>,
+
+    // selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
+
+}
 
 struct Line<'data> {
     content: String,
@@ -238,15 +288,11 @@ pub fn handle_directory_input<'me,'arena>(
             }
 
             KeyCode::Char('w') => {
-                if state.asm_cursor > 0 {
-                    state.asm_cursor-=1;
-                }
+                state.asm_up()
             }
 
             KeyCode::Char('s') => {
-                if state.asm_cursor < state.selected_asm.len().saturating_sub(1){
-                    state.asm_cursor+=1;
-                }
+                state.asm_down()
             }
 
             KeyCode::Enter => {
@@ -302,16 +348,11 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'a
         match code {
             KeyCode::Char('q') => return Ok(FileResult::Exit),
             KeyCode::Char('w') => {
-                if state.global.asm_cursor > 0 {
-                    state.global.asm_cursor-=1;
-                }
+                state.global.asm_up()
             }
 
             KeyCode::Char('s') => {
-                if state.global.asm_cursor < state.global.selected_asm.len().saturating_sub(1){
-                    state.global.asm_cursor+=1;
-
-                }
+                state.global.asm_down()
             }
 
             KeyCode::Up  => {
@@ -482,7 +523,7 @@ fn make_assembly_inner<'a>(state: &GlobalState) -> List<'a>
     // let mut asm_items = Vec::new();
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
-    for ins in state.selected_asm.iter().map(|(_,x)| x).skip(state.asm_cursor) {
+    for ins in state.cur_asm_range().map(|(_, v)| *v) {
         if ins.serial_number as isize != prev+1{
             asm_items.push(
                 ListItem::new(
