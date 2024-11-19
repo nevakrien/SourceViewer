@@ -254,7 +254,8 @@ pub fn render_directory(
             .highlight_symbol(">> ");
 
         f.render_stateful_widget(list, layout[0], &mut state.dir_list_state);
-        f.render_widget(make_assembly_inner(state), layout[1]);
+        let asm_lines = layout[1].height.saturating_sub(2) as usize;
+        f.render_widget(make_assembly_inner(state,asm_lines), layout[1]);
     })?;
     Ok(())
 }
@@ -502,16 +503,17 @@ pub fn render_file_asm_viewer(
 
         f.render_stateful_widget(list, layout[0], &mut list_state);
 
-
-        f.render_widget(make_assembly_inner(state.global), layout[1]);
+        let asm_lines = layout[1].height.saturating_sub(2) as usize;
+        f.render_widget(make_assembly_inner(state.global,asm_lines), layout[1]);
     })?;
     Ok(())
 }
 
-fn make_assembly_inner<'a>(state: &GlobalState) -> List<'a>
+fn make_assembly_inner<'a>(state: &GlobalState,max_visible_lines:usize) -> List<'a>
  // op:Option<I>,
  // where I: Iterator<Item = &'a InstructionDetail> + ExactSizeIterator ,
- {
+ {  
+
     let asm_block = Block::default()
             .borders(Borders::ALL)
             .title(Span::styled(
@@ -523,7 +525,7 @@ fn make_assembly_inner<'a>(state: &GlobalState) -> List<'a>
     // let mut asm_items = Vec::new();
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
-    for ins in state.cur_asm_range().map(|(_, v)| *v) {
+    for ins in state.cur_asm_range().map(|(_, v)| *v).take(max_visible_lines) {
         if ins.serial_number as isize != prev+1{
             asm_items.push(
                 ListItem::new(
