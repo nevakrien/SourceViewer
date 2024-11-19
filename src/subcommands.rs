@@ -1,14 +1,10 @@
+use crate::walk::FileResult;
+use crate::walk::TerminalSession;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeRegistry;
-use crate::walk::render_file_asm_viewer;
-use crate::walk::handle_file_input;
-use crate::walk::create_terminal;
-use crate::walk::TerminalCleanup;
-use crate::walk::{GlobalState,DirResult,FileResult};
-use crate::walk::render_directory;
-use crate::walk::handle_directory_input;
+use crate::walk::{GlobalState};
 
 
 use crate::program_context::AsmRegistry;
@@ -42,35 +38,13 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
     .get_lines_map()?;
 
 
-    let mut terminal = create_terminal()?;
-    let _cleanup = TerminalCleanup;
+
+    // let mut terminal = create_terminal()?;
+    // let _cleanup = TerminalCleanup;
     let mut state = GlobalState::start()?;
+    let mut session = TerminalSession::new(&mut state)?;
 
-
-    state.dir_list_state.select(Some(0)); // Initialize the selected index
-
-    loop {
-        render_directory(&mut terminal, &mut state)?;
-        match handle_directory_input(&mut state)? {
-            DirResult::KeepGoing =>{},
-            DirResult::Exit =>{return Ok(())},
-            DirResult::File(mut f) =>{
-                
-                let path :Arc<Path>=  fs::canonicalize(Path::new(&f.file_path))?.into();
-                let code_file = code_files.get_source_file(path)?;
-                loop {
-                    render_file_asm_viewer(&mut terminal, &mut f,code_file,obj_file.clone())?;
-                    match handle_file_input(&mut f,code_file,obj_file.clone())? {
-                        FileResult::KeepGoing=>{},
-                        FileResult::Dir => {break}
-                        FileResult::Exit => {return Ok(())},
-                        
-                    }
-                }
-            },
-        }
-    }
-
+    session.walk_directory_loop(&mut code_files,obj_file)
 }
 
 
@@ -281,10 +255,25 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
     let file_path = matches.get_one::<PathBuf>("BIN").ok_or("BIN argument is required")?;
 
     // Check if the `-a` flag is set
-    let set_flag = matches.get_flag("all");
+    let look_all = matches.get_flag("all");
 
     // Gather selections (either indices or paths)
-    let selections: Vec<_> = matches.get_many::<FileSelection>("SELECTIONS").unwrap_or_default().collect();
+    let mut selections = matches.get_many::<FileSelection>("SELECTIONS").unwrap_or_default();//.collect();
+
+    // Return an error if both `-a` is set and `selections` are provided
+    if look_all && selections.len() > 0 {
+        return Err("Cannot set both '--all' flag and specify selections. Please choose either to display all files or specific selections.".into());
+    }
+
+    let walk = matches.get_flag("walk");
+
+    if walk && (look_all ||  selections.len() > 1){
+        return Err("Can only walk in 1 file at a time".into());
+    }
+
+    if walk &&  selections.len() == 0 {
+        return Err("No walk selection provided".into());
+    }
 
     // Load and parse the binary
     let buffer = fs::read(file_path)?;
@@ -304,6 +293,62 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         }
     }
 
+    if walk {
+        let obj_file :Arc<Path>= file_path.as_path().into();
+        let asm_arena = Arena::new();
+        let code_arena = Arena::new();
+        let mut registry = AsmRegistry::new(&asm_arena);
+        let mut code_files = CodeRegistry::new(&mut registry,&code_arena);
+        code_files.visit_machine_file(obj_file.clone())?
+        .get_lines_map()?;
+        
+        let file_path = match selections.next().unwrap() {
+            FileSelection::Index(i) => {
+                    if let Some(file) = source_files.get(*i) {
+                        file
+                    } else {
+                        println!("{}", format!("Index {} is out of bounds", i).red());
+                        return Ok(());
+                    }
+                }
+                FileSelection::Path(path) => {
+                    let path_str = path.to_string_lossy().to_string();
+                    if let Some(&index) = source_files_map.get(&path_str) {
+                        &source_files[index]
+                    } else {
+                        println!("{}", format!("Path {:?} is not included in the binary", path).red());
+                        return Ok(());
+                    }
+                }
+        };
+        let file_path = Path::new(file_path);
+        let parent =  file_path.parent()
+        .ok_or("No parent dir to path")?
+        .to_path_buf();
+
+        let mut state = GlobalState::start_from(parent)?;
+        let mut session = TerminalSession::new(&mut state)?;
+        
+        //file
+        {
+            let mut file_state = crate::walk::load_file(session.state,file_path)?;
+            let code_file = code_files.get_source_file(file_path.into())?;
+            let res =TerminalSession::walk_file_loop(
+                &mut session.terminal,
+                &mut file_state,
+                code_file,obj_file.clone()
+            )?;
+
+            match res {
+                FileResult::Exit => {return Ok(())},
+                FileResult::Dir => {}, 
+                FileResult::KeepGoing => unreachable!()
+            }
+        }
+
+        return session.walk_directory_loop(&mut code_files,obj_file);
+    }
+
     // Display source files with their indices
     println!("Source files:");
     for (index, file) in source_files.iter().enumerate() {
@@ -313,12 +358,12 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
     // Collect files to display based on the selections or `-a` flag
     let mut files_to_display: Vec<&String> = Vec::new();
 
-    if set_flag {
+    if look_all {
         // Add all files if `-a` is set
         files_to_display.extend(source_files.iter());
     } else {
         // Add files based on selections
-        for selection in selections.iter() {
+        for selection in selections {
             match selection {
                 FileSelection::Index(i) => {
                     if let Some(file) = source_files.get(*i) {

@@ -1,3 +1,4 @@
+use crate::program_context::CodeRegistry;
 use core::cmp::min;
 use std::collections::BTreeMap;
 use std::collections::btree_map;
@@ -56,13 +57,16 @@ pub struct GlobalState<'arena> {
 
 
 impl<'arena> GlobalState<'arena> {
-    pub fn start() -> Result<Self, Box<dyn std::error::Error>>  {
-        let dir_entries = fs::read_dir(".")?
+     pub fn start() -> Result<Self, Box<dyn std::error::Error>> {
+        GlobalState::start_from(PathBuf::from("."))
+     }
+    pub fn start_from(path:PathBuf) -> Result<Self, Box<dyn std::error::Error>>  {
+        let dir_entries = fs::read_dir(&*path)?
                     .filter_map(Result::ok)
                     .collect();
-        Ok(Self {
-            current_dir: PathBuf::from("."),
-            original_dir: PathBuf::from("."),
+        let mut state = Self {
+            current_dir:path.clone(),
+            original_dir: path,
             dir_list_state: ListState::default(),
             // mode: Mode::Dir,
             // file_content: Vec::new(),
@@ -80,7 +84,10 @@ impl<'arena> GlobalState<'arena> {
             cur_asm:0,
 
             // asm_lines: BTreeMap::default()
-        })
+        };
+
+        state.dir_list_state.select(Some(0)); // Initialize the selected index
+        Ok(state)
     }
 
     fn add_asm_line(&mut self,debug:Option<&'arena [InstructionDetail]>) {
@@ -325,7 +332,7 @@ pub fn handle_directory_input<'me,'arena>(
 
 
 
-pub fn load_file<'b,'arena>(global:&'b mut GlobalState<'arena>, path:&PathBuf) -> Result<FileState<'b,'arena>, Box<dyn std::error::Error>> {
+pub fn load_file<'b,'arena>(global:&'b mut GlobalState<'arena>, path:&Path) -> Result<FileState<'b,'arena>, Box<dyn std::error::Error>> {
     Ok(FileState{
     file_content :read_file_lines(path)?,
     file_path : path.display().to_string(),
@@ -413,7 +420,7 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'a
 }
 
 
-fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line<'static>>> {
+fn read_file_lines(path: &Path) -> io::Result<Vec<Line<'static>>> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
     Ok(reader.lines().map_while(Result::ok)
@@ -428,7 +435,7 @@ fn read_file_lines(path: &PathBuf) -> io::Result<Vec<Line<'static>>> {
 // Helper function to create a line without a line number and styling
 fn create_line<'a>(line: &Line,show_lines:bool) -> ListItem<'a> {
     let line_style = if line.is_selected {
-        Style::default().fg(Color::Red)
+        Style::default().fg(Color::Red)//.bg(Color::Rgb(50,0,0))
     } else {
         Style::default()
     };
@@ -442,7 +449,12 @@ fn create_line<'a>(line: &Line,show_lines:bool) -> ListItem<'a> {
         }
     ;
 
-    let line_content_span = Span::styled(line.content.clone(), line_style);
+    let line_text = match line.content.as_str() {
+        ""=> "-".to_string(),
+        a => a.to_string(),
+    };
+
+    let line_content_span = Span::styled(line_text, line_style);
     ListItem::new(Spans::from(vec![line_number_span, line_content_span]))
 }
 
@@ -554,4 +566,71 @@ fn make_assembly_inner<'a>(state: &GlobalState,max_visible_lines:usize) -> List<
     // .highlight_style(Style::default()
     // .bg(Color::DarkGray)
     // .add_modifier(Modifier::BOLD))
+}
+
+pub struct TerminalSession<'me,'arena> {
+    pub terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    _cleanup: TerminalCleanup,  // Ensures cleanup lasts as long as TerminalSession
+    pub state: &'me mut GlobalState<'arena>,
+}
+
+impl<'me,'arena> TerminalSession<'me,'arena> {
+    // Initialize Terminal, GlobalState, and TerminalCleanup
+    pub fn new(state:&'me mut GlobalState<'arena>) -> Result<Self, Box<dyn std::error::Error>> {
+        let terminal = create_terminal()?;
+        let cleanup = TerminalCleanup;
+        // let state = GlobalState::start()?;
+        Ok(Self {
+            terminal,
+            _cleanup: cleanup,
+            state,
+        })
+    }
+
+    // Directory loop to select files
+    pub fn walk_directory_loop(
+        &mut self,
+        code_files: &mut CodeRegistry<'_,'arena>,
+        obj_file: Arc<Path>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        loop {
+            render_directory(&mut self.terminal, &mut self.state)?;
+
+            let terminal = &mut self.terminal;
+            let state = &mut self.state;
+
+            match handle_directory_input(state)? {
+                DirResult::KeepGoing => {},
+                DirResult::Exit => return Ok(()),
+                DirResult::File(mut file_state) => {
+                    let path: Arc<Path> = fs::canonicalize(Path::new(&file_state.file_path))?.into();
+                    let code_file = code_files.get_source_file(path)?;
+                    let res = Self::walk_file_loop(terminal,&mut file_state, code_file, obj_file.clone())?;
+
+                    match res {
+                        FileResult::Exit => {return Ok(())},
+                        FileResult::Dir => {}, 
+                        FileResult::KeepGoing => unreachable!()
+                    }
+                }
+            }
+        }
+    }
+
+    // File loop to display and navigate files
+    pub fn walk_file_loop(
+        terminal : &mut Terminal<CrosstermBackend<io::Stdout>>,
+        file_state: &mut FileState<'_,'arena>,
+        code_file: &'arena CodeFile,
+        obj_file: Arc<Path>,
+    ) -> Result<FileResult, Box<dyn std::error::Error>> {
+        loop {
+            render_file_asm_viewer(terminal, file_state, code_file, obj_file.clone())?;
+            let res = handle_file_input(file_state, code_file, obj_file.clone())?;
+            match  res{
+                FileResult::KeepGoing => {},
+                _ => {return Ok(res)}
+            }
+        }
+    }
 }

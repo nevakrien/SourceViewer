@@ -68,10 +68,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .action(clap::ArgAction::SetTrue), // Sets the flag as a binary on/off
                 )
                 .arg(
+                    Arg::new("walk")
+                        .short('w')
+                        .long("walk")
+                        .help("start the walk command on the selected file")
+                        .action(clap::ArgAction::SetTrue), // Sets the flag as a binary on/off
+                        
+                )
+                .arg(
                     Arg::new("SELECTIONS")
                         .help("Specific indices or file paths to display")
                         .required(false)
-                        .num_args(0..) // Allows zero or more additional arguments
+                        .num_args(1..) //0 args is handled by unwrap_or_defualt
                         .value_parser(clap::builder::ValueParser::new(|s: &str| {
                             if let Ok(index) = s.parse::<usize>() {
                                 Ok(FileSelection::Index(index))
