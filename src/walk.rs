@@ -1,3 +1,4 @@
+use core::cmp::min;
 use std::collections::BTreeMap;
 use std::fs;
 use std::sync::Arc;
@@ -34,7 +35,7 @@ pub enum Mode {
     File,
 }
 
-pub struct GlobalState {
+pub struct GlobalState<'arena> {
     current_dir: PathBuf,
     original_dir: PathBuf,
     pub dir_list_state: ListState,
@@ -42,9 +43,13 @@ pub struct GlobalState {
 
     show_lines: bool,
 
+    selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
+    asm_cursor: usize,
+
+
 }
 
-pub struct FileState<'arena> {
+pub struct FileState<'me,'arena> {
 
     // pub current_dir: PathBuf,
     // pub original_dir: PathBuf,
@@ -58,37 +63,14 @@ pub struct FileState<'arena> {
     pub file_path: String,
 
 
-    asm_cursor: usize,
-    global: &'arena mut GlobalState,
+    global: &'me mut GlobalState<'arena>,
 
-    selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
+    // selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
 
 }
 
-impl<'arena> FileState<'arena> {
-    fn add_asm_line(&mut self,debug:Option<&'arena [InstructionDetail]>) {
-        match debug {
-            None=>{},
-            Some(data)=>{
-                self.selected_asm.extend(
-                data.iter().map(|x| 
-                    (x.address,x)
-                    )                
-                );
-            }
-        }
-        
-    }
 
-    fn remove_asm_line(&mut self,debug:Option<&'arena [InstructionDetail]>) {
-        for address in debug.unwrap_or_default().iter().map(|x| x.address){
-            self.selected_asm.remove(&address);
-        }
-        
-    }
-}
-
-impl GlobalState {
+impl<'arena> GlobalState<'arena> {
     pub fn start() -> Result<Self, Box<dyn std::error::Error>>  {
         let dir_entries = fs::read_dir(".")?
                     .filter_map(Result::ok)
@@ -107,11 +89,35 @@ impl GlobalState {
             // file_path: String::new(),
 
             show_lines: false,
+            selected_asm: BTreeMap::new(),
 
-            // asm_cursor:0,
+            asm_cursor:0,
 
             // asm_lines: BTreeMap::default()
         })
+    }
+
+    fn add_asm_line(&mut self,debug:Option<&'arena [InstructionDetail]>) {
+        match debug {
+            None=>{},
+            Some(data)=>{
+                // let current_addres = self
+                self.selected_asm.extend(
+                data.iter().map(|x| 
+                    (x.address,x)
+                    )                
+                );
+            }
+        }
+        
+    }
+
+    fn remove_asm_line(&mut self,debug:Option<&'arena [InstructionDetail]>) {
+        for address in debug.unwrap_or_default().iter().map(|x| x.address){
+            self.selected_asm.remove(&address);
+        }
+        self.asm_cursor = min(self.asm_cursor,self.selected_asm.len());
+        
     }
 }
 
@@ -179,9 +185,11 @@ pub fn render_directory(
 
     terminal.draw(|f| {
         let size = f.size();
+
+        // Layout: Split vertically for source and assembly (if selected)
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(100)].as_ref())
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
             .split(size);
 
         let list_block = Block::default()
@@ -196,37 +204,51 @@ pub fn render_directory(
             .highlight_symbol(">> ");
 
         f.render_stateful_widget(list, layout[0], &mut state.dir_list_state);
+        f.render_widget(make_assembly_inner(state), layout[1]);
     })?;
     Ok(())
 }
 
-pub enum DirResult<'arena> {
+pub enum DirResult<'me,'arena> {
     
     KeepGoing,
-    File(FileState<'arena>),
+    File(FileState<'me, 'arena>),
     Exit
 }
 
-pub fn handle_directory_input(
-    state: &mut GlobalState,
-) -> Result<DirResult, Box<dyn std::error::Error>> {
+pub fn handle_directory_input<'me,'arena>(
+    state: &'me mut GlobalState<'arena>,
+) -> Result<DirResult<'me,'arena>, Box<dyn std::error::Error>> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
             KeyCode::Char('q') => return Ok(DirResult::Exit),
-            KeyCode::Down | KeyCode::Char('s') => {
+            KeyCode::Down  => {
                 let i = match state.dir_list_state.selected() {
                     Some(i) => (i + 1) % state.dir_entries.len(),
                     None => 0,
                 };
                 state.dir_list_state.select(Some(i));
             }
-            KeyCode::Up | KeyCode::Char('w') => {
+            KeyCode::Up  => {
                 let i = match state.dir_list_state.selected() {
                     Some(i) => if i == 0 { state.dir_entries.len() - 1 } else { i - 1 },
                     None => 0,
                 };
                 state.dir_list_state.select(Some(i));
             }
+
+            KeyCode::Char('w') => {
+                if state.asm_cursor > 0 {
+                    state.asm_cursor-=1;
+                }
+            }
+
+            KeyCode::Char('s') => {
+                if state.asm_cursor < state.selected_asm.len().saturating_sub(1){
+                    state.asm_cursor+=1;
+                }
+            }
+
             KeyCode::Enter => {
                 if let Some(i) = state.dir_list_state.selected() {
                     let path = state.dir_entries[i].path();
@@ -256,15 +278,15 @@ pub fn handle_directory_input(
 
 
 
-pub fn load_file<'arena>(global:&'arena mut GlobalState, path:&PathBuf) -> Result<FileState<'arena>, Box<dyn std::error::Error>> {
+pub fn load_file<'b,'arena>(global:&'b mut GlobalState<'arena>, path:&PathBuf) -> Result<FileState<'b,'arena>, Box<dyn std::error::Error>> {
     Ok(FileState{
     file_content :read_file_lines(path)?,
     file_path : path.display().to_string(),
     file_scroll : 0,
     cursor : 0,
-    asm_cursor :0,
+    // asm_cursor :0,
     global,
-    selected_asm: BTreeMap::new(),
+    // selected_asm: BTreeMap::new(),
     })
 }
 
@@ -275,10 +297,22 @@ pub enum FileResult {
 }
 
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
-pub fn handle_file_input<'arena>(state: &mut FileState<'arena>,code_file: &'arena CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
+pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'arena CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
             KeyCode::Char('q') => return Ok(FileResult::Exit),
+            KeyCode::Char('w') => {
+                if state.global.asm_cursor > 0 {
+                    state.global.asm_cursor-=1;
+                }
+            }
+
+            KeyCode::Char('s') => {
+                if state.global.asm_cursor < state.global.selected_asm.len().saturating_sub(1){
+                    state.global.asm_cursor+=1;
+
+                }
+            }
 
             KeyCode::Up  => {
                 if state.cursor > 0 {
@@ -289,19 +323,10 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'arena>,code_file: &'aren
                         state.file_scroll = state.cursor;
                     }
 
-                    state.asm_cursor=0;
                 }
             }
 
-            KeyCode::Char('w') => {
-                if state.asm_cursor > 0 {
-                    state.asm_cursor-=1;
-                }
-            }
-
-            KeyCode::Char('s') => {
-                state.asm_cursor+=1;
-            }
+            
 
             KeyCode::Down  => {
                 if state.cursor < state.file_content.len().saturating_sub(1) {
@@ -314,7 +339,6 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'arena>,code_file: &'aren
                     }
                 }
 
-                state.asm_cursor=0;
             },
 
             KeyCode::Enter => {
@@ -325,10 +349,10 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'arena>,code_file: &'aren
 
 
                     if line.is_selected{    
-                        
-                        state.add_asm_line(info)
+                        state.global.add_asm_line(info)
                     }else {
-                        state.remove_asm_line(info)
+                        state.global.remove_asm_line(info)
+
                     }
 
                 } else {
@@ -437,64 +461,54 @@ pub fn render_file_asm_viewer(
 
         f.render_stateful_widget(list, layout[0], &mut list_state);
 
-        // Assembly view block
-        let asm_block = Block::default()
+
+        f.render_widget(make_assembly_inner(state.global), layout[1]);
+    })?;
+    Ok(())
+}
+
+fn make_assembly_inner<'a>(state: &GlobalState) -> List<'a>
+ // op:Option<I>,
+ // where I: Iterator<Item = &'a InstructionDetail> + ExactSizeIterator ,
+ {
+    let asm_block = Block::default()
             .borders(Borders::ALL)
             .title(Span::styled(
                 "Assembly View",
                 Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             ));
 
-        let asm_list = List::new(make_assembly_inner(
-            // code_file.get_asm(&( (state.cursor+1) as u32),obj_path).map(|x| x.iter()),
-            Some(state.selected_asm.values().map(|x| *x)),
-            state
-            ));
-        f.render_widget(asm_list.block(asm_block), layout[1]);
-    })?;
-    Ok(())
-}
+    let mut prev = -1isize;
+    // let mut asm_items = Vec::new();
+    let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
-fn make_assembly_inner<'a, I>(op:Option<I>,state: &FileState) -> Vec<ListItem<'a>>
- where I: Iterator<Item = &'a InstructionDetail> + ExactSizeIterator ,
- {
-    match op {
-        Some(instructions) => {
-            let mut prev = -1isize;
-            // let mut asm_items = Vec::new();
-            let mut asm_items = Vec::with_capacity(instructions.len());
-
-            for ins in instructions.skip(state.asm_cursor) {
-                if ins.serial_number as isize != prev+1{
-                    asm_items.push(
-                        ListItem::new(
-                        vec![Spans::from("DETATCH")]
-                        )
-                        .style(Style::default().fg(Color::Red))
-                    )
-            
-                }
-                prev = ins.serial_number as isize;
-                let formatted_instruction = format!(
-                    "{:<4} {:#010x}: {:<6} {:<30}",
-                    ins.serial_number,
-                    ins.address,
-                    ins.mnemonic,
-                    ins.op_str,
-                ).to_string();
-
-                asm_items.push(ListItem::new(vec![Spans::from(formatted_instruction)])
-                        .style(Style::default().fg(Color::Cyan)))
-
-            }
-
-            // List::new(asm_items)
-            asm_items
-        },
-        None => {
-            // let error_msg = vec![ListItem::new(Spans::from("No assembly instructions for this line."))];
-            // List::new(error_msg)
-            vec![ListItem::new(Spans::from("No assembly instructions for this line."))]
+    for ins in state.selected_asm.iter().map(|(_,x)| x).skip(state.asm_cursor) {
+        if ins.serial_number as isize != prev+1{
+            asm_items.push(
+                ListItem::new(
+                vec![Spans::from("DETATCH")]
+                )
+                .style(Style::default().fg(Color::Red))
+            )
+    
         }
+        prev = ins.serial_number as isize;
+        let formatted_instruction = format!(
+            "{:<4} {:#010x}: {:<6} {:<30}",
+            ins.serial_number,
+            ins.address,
+            ins.mnemonic,
+            ins.op_str,
+        ).to_string();
+
+        asm_items.push(ListItem::new(vec![Spans::from(formatted_instruction)])
+                .style(Style::default().fg(Color::Cyan)))
+
     }
+
+    List::new(asm_items)
+    .block(asm_block)
+    // .highlight_style(Style::default()
+    // .bg(Color::DarkGray)
+    // .add_modifier(Modifier::BOLD))
 }
