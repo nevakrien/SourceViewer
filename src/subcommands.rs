@@ -8,7 +8,7 @@ use crate::walk::render_file_asm_viewer;
 use crate::walk::handle_file_input;
 use crate::walk::create_terminal;
 use crate::walk::TerminalCleanup;
-use crate::walk::State;
+use crate::walk::{GlobalState, FileState,DirResult,FileResult};
 use crate::walk::render_directory;
 use crate::walk::handle_directory_input;
 use crate::walk::Mode;
@@ -46,36 +46,34 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
 
     let mut terminal = create_terminal()?;
     let _cleanup = TerminalCleanup;
-    let mut state = State::start()?;
+    let mut state = GlobalState::start()?;
 
 
     state.dir_list_state.select(Some(0)); // Initialize the selected index
 
     loop {
-        match state.mode {
-            Mode::Dir => {
-                // let entries: Vec<_> = fs::read_dir(&state.current_dir)?
-                //     .filter_map(Result::ok)
-                //     .collect();
-                render_directory(&mut terminal, &mut state)?;
-                if handle_directory_input(&mut state)? {
-                    break;
-                }
-            }
-            Mode::File => {
-                let path :Arc<Path>=  fs::canonicalize(Path::new(&state.file_path))?.into();
+
+        render_directory(&mut terminal, &mut state)?;
+        match handle_directory_input(&mut state)? {
+            DirResult::KeepGoing =>{},
+            DirResult::Exit =>{return Ok(());},
+            DirResult::File(mut f) =>{
+                 let path :Arc<Path>=  fs::canonicalize(Path::new(&f.file_path))?.into();
 
                 let code_file = code_files.get_source_file(path.clone())?;
-
-                render_file_asm_viewer(&mut terminal, &mut state,code_file,obj_file.clone())?;
-                if handle_file_input(&mut state)? {
-                    break;
+                loop {
+                    render_file_asm_viewer(&mut terminal, &mut f,code_file,obj_file.clone())?;
+                    match handle_file_input(&mut f,code_file,obj_file.clone())? {
+                        FileResult::KeepGoing=>{},
+                        FileResult::Dir => {break;}
+                        FileResult::Exit => {return Ok(())},
+                        
+                    }
                 }
-            }
-        };
+            },
+        }
     }
 
-    Ok(())
 }
 
 

@@ -28,28 +28,38 @@ impl Drop for TerminalCleanup {
     }
 }
 
+#[derive(PartialEq,Clone,Debug)]
 pub enum Mode {
     Dir,
     File,
 }
 
-pub struct State {
-
+pub struct GlobalState {
     pub current_dir: PathBuf,
     pub original_dir: PathBuf,
     pub dir_list_state: ListState,
-    pub mode: Mode,
-    pub file_content: Vec<Line>,
     pub dir_entries: Box<[std::fs::DirEntry]>,
+
+    pub show_lines: bool,
+
+}
+
+pub struct FileState<'a> {
+
+    // pub current_dir: PathBuf,
+    // pub original_dir: PathBuf,
+    // pub dir_list_state: ListState,
+    // pub mode: Mode,
+    pub file_content: Vec<Line>,
+    
 
     pub file_scroll: usize,
     pub cursor: usize,
     pub file_path: String,
 
-    pub show_lines: bool,
 
     pub asm_cursor: usize,
-
+    pub global: &'a mut GlobalState,
 
     //wish i could do
     // pub asm_lines: BTreeMap<usize,Option<&'a [InstructionDetail]>>
@@ -60,7 +70,7 @@ pub struct State {
 }
 
 
-impl State {
+impl GlobalState {
     pub fn start() -> Result<Self, Box<dyn std::error::Error>>  {
         let dir_entries = fs::read_dir(".")?
                     .filter_map(Result::ok)
@@ -69,22 +79,26 @@ impl State {
             current_dir: PathBuf::from("."),
             original_dir: PathBuf::from("."),
             dir_list_state: ListState::default(),
-            mode: Mode::Dir,
-            file_content: Vec::new(),
+            // mode: Mode::Dir,
+            // file_content: Vec::new(),
             dir_entries,
             
 
-            file_scroll: 0,
-            cursor: 0,
-            file_path: String::new(),
+            // file_scroll: 0,
+            // cursor: 0,
+            // file_path: String::new(),
 
             show_lines: false,
 
-            asm_cursor:0,
+            // asm_cursor:0,
+
             // asm_lines: BTreeMap::default()
         })
     }
 }
+
+
+
 
 pub struct Line {
     content: String,
@@ -112,7 +126,7 @@ pub fn create_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, io::E
     Terminal::new(backend)
 }
 
-pub fn load_dir(state:&mut State) -> Result<(), Box<dyn std::error::Error>> {
+pub fn load_dir(state:&mut GlobalState) -> Result<(), Box<dyn std::error::Error>> {
     state.dir_entries = fs::read_dir(&state.current_dir)?
                     .filter_map(Result::ok)
                     .collect();
@@ -121,7 +135,7 @@ pub fn load_dir(state:&mut State) -> Result<(), Box<dyn std::error::Error>> {
 
 pub fn render_directory(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    state: &mut State,
+    state: &mut GlobalState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let items: Vec<ListItem> = state.dir_entries
         .iter()
@@ -154,12 +168,18 @@ pub fn render_directory(
     Ok(())
 }
 
+pub enum DirResult<'a> {
+    KeepGoing,
+    File(FileState<'a>),
+    Exit
+}
+
 pub fn handle_directory_input(
-    state: &mut State,
-) -> Result<bool, Box<dyn std::error::Error>> {
+    state: &mut GlobalState,
+) -> Result<DirResult, Box<dyn std::error::Error>> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
-            KeyCode::Char('q') => return Ok(true),
+            KeyCode::Char('q') => return Ok(DirResult::Exit),
             KeyCode::Down | KeyCode::Char('s') => {
                 let i = match state.dir_list_state.selected() {
                     Some(i) => (i + 1) % state.dir_entries.len(),
@@ -182,7 +202,7 @@ pub fn handle_directory_input(
                         load_dir(state)?;
                         state.dir_list_state.select(Some(0));
                     } else if path.is_file() {
-                        load_file(state,&path)?;
+                        return Ok(DirResult::File(load_file(state,&path)?));
 
                     }
                 }
@@ -198,26 +218,35 @@ pub fn handle_directory_input(
             _ => {}
         }
     }
-    Ok(false)
+    Ok(DirResult::KeepGoing)
 }
 
 
 
-pub fn load_file(state:&mut State,path:&PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    state.file_content = read_file_lines(path)?;
-    state.file_path = path.display().to_string();
-    state.mode = Mode::File;
-    state.file_scroll = 0;
-    state.cursor = 0;
-    Ok(())
+pub fn load_file<'a>(global:&'a mut GlobalState, path:&PathBuf) -> Result<FileState<'a>, Box<dyn std::error::Error>> {
+    Ok(FileState{
+
+
+    file_content :read_file_lines(path)?,
+    file_path : path.display().to_string(),
+    file_scroll : 0,
+    cursor : 0,
+    asm_cursor :0,
+    global
+    })
 }
 
+pub enum FileResult {
+    Dir,
+    KeepGoing,
+    Exit
+}
 
 //code_file: &'a CodeFile,obj_path: Arc<Path>
-pub fn handle_file_input<'a>(state: &mut State, ) -> Result<bool, io::Error> {
+pub fn handle_file_input<'a>(state: &mut FileState,code_file: &'a CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
         match code {
-            KeyCode::Char('q') => return Ok(true),
+            KeyCode::Char('q') => return Ok(FileResult::Exit),
 
             KeyCode::Up  => {
                 if state.cursor > 0 {
@@ -274,14 +303,14 @@ pub fn handle_file_input<'a>(state: &mut State, ) -> Result<bool, io::Error> {
                 }
             }
 
-            KeyCode::Char('l') => state.show_lines = !state.show_lines,
+            KeyCode::Char('l') => state.global.show_lines = !state.global.show_lines,
 
-            KeyCode::Esc => state.mode = Mode::Dir,
+            KeyCode::Esc => {return Ok(FileResult::Dir);},
 
             _ => {}
         }
     }
-    Ok(false)
+    Ok(FileResult::KeepGoing)
 }
 
 
@@ -322,7 +351,7 @@ fn create_line<'a>(line: &'a Line,show_lines:bool) -> ListItem<'a> {
 
 pub fn render_file_asm_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    state: &mut State,
+    state: &mut FileState,
     code_file: &CodeFile,
     obj_path: Arc<Path>,
 
@@ -362,7 +391,7 @@ pub fn render_file_asm_viewer(
             // .enumerate()
             .map(|line| {
                 // let asm_list = make_assembly_inner(code_file.get_asm(&(line.line_number as u32),obj_path.clone()));
-                create_line(line,state.show_lines)//,asm_list)
+                create_line(line,state.global.show_lines)//,asm_list)
             })
             .collect();
 
@@ -392,7 +421,7 @@ pub fn render_file_asm_viewer(
     Ok(())
 }
 
-fn make_assembly_inner<'a, I>(op:Option<I>,state: &State) -> Vec<ListItem<'a>>
+fn make_assembly_inner<'a, I>(op:Option<I>,state: &FileState) -> Vec<ListItem<'a>>
  where I: Iterator<Item = &'a InstructionDetail> ,
  {
     match op {
