@@ -1,7 +1,6 @@
 use crate::program_context::CodeRegistry;
 use core::cmp::min;
 use std::collections::BTreeMap;
-use std::collections::btree_map;
 use std::fs;
 use std::sync::Arc;
 use std::path::Path;
@@ -463,8 +462,8 @@ fn create_line<'a>(line: &Line,show_lines:bool) -> ListItem<'a> {
 pub fn render_file_asm_viewer(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     state: &mut FileState,
-    code_file: &CodeFile,
-    obj_path: Arc<Path>,
+    // code_file: &CodeFile,
+    // obj_path: Arc<Path>,
 
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
@@ -594,7 +593,7 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         obj_file: Arc<Path>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         loop {
-            render_directory(&mut self.terminal, &mut self.state)?;
+            render_directory(&mut self.terminal, self.state)?;
 
             let terminal = &mut self.terminal;
             let state = &mut self.state;
@@ -625,7 +624,7 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
         loop {
-            render_file_asm_viewer(terminal, file_state, code_file, obj_file.clone())?;
+            render_file_asm_viewer(terminal, file_state)?;
             let res = handle_file_input(file_state, code_file, obj_file.clone())?;
             match  res{
                 FileResult::KeepGoing => {},
