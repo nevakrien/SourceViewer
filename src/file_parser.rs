@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::btree_map;
 use std::collections::HashMap;
 use std::path::Path;
@@ -56,12 +57,12 @@ pub struct  MachineFileInner<'a> {
     pub sections: Vec<Section<'a>>,
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
     pub sections: Vec<Section<'a>>,
-    pub dwarf : Option<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>>,
-    pub file_lines: Option<Arc<FileMap>>, //line -> instruction>,
+    dwarf : Cell<Option<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>>>,
+    file_lines: Cell<Option<Arc<FileMap>>>, //line -> instruction>,
 }
 
 #[derive(Clone,Debug,PartialEq)]
@@ -105,9 +106,10 @@ pub struct InstructionDetail {
 
 
 impl<'a> MachineFile<'a> {
-    pub fn get_lines_map(&mut self) -> Result<Arc<FileMap>, Box<dyn Error>> {
-        if let Some(ans) = &self.file_lines {
-            return Ok(ans.clone())
+    pub fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
+        if let Some(ans) = self.file_lines.replace(None) {
+            self.file_lines.set(Some(ans.clone()));
+            return Ok(ans)
         }
 
         let dwarf = self.load_dwarf()?;
@@ -156,7 +158,7 @@ impl<'a> MachineFile<'a> {
             }
         }
 
-        self.file_lines = Some(ans.clone());
+        self.file_lines.set(Some(ans.clone()));
         Ok(ans)
     }
 
@@ -164,9 +166,10 @@ impl<'a> MachineFile<'a> {
         self.obj.section_by_name(section.name()).and_then(|x| x.data().ok()).unwrap_or(&[])
     }
 
-    pub fn load_dwarf(&mut self) -> Result<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>, gimli::Error>{
-        if let Some(dwarf) = &self.dwarf {
-            return Ok(dwarf.clone())
+    pub fn load_dwarf(&self) -> Result<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>, gimli::Error>{
+        if let Some(dwarf) = self.dwarf.replace(None) {
+            self.dwarf.set(Some(dwarf.clone()));
+            return Ok(dwarf)
         }
 
        let endian = if self.obj.is_little_endian() { RunTimeEndian::Little } else { RunTimeEndian::Big };
@@ -174,8 +177,10 @@ impl<'a> MachineFile<'a> {
             Ok(EndianSlice::new(self.get_gimli_section(section), endian))
         });
 
-       self.dwarf = Some(dwarf?.into());
-       Ok(self.dwarf.clone().unwrap())
+       let dwarf = Arc::new(dwarf?);
+
+       self.dwarf.set(Some(dwarf.clone()));
+       Ok(dwarf)
     }
 
     pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
@@ -223,8 +228,8 @@ impl<'a> MachineFile<'a> {
         Ok(MachineFile {
             obj,
             sections: parsed_sections,
-            dwarf:None,
-            file_lines: None
+            dwarf:None.into(),
+            file_lines: None.into()
         })
     }
 

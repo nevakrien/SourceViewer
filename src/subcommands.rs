@@ -33,9 +33,10 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
     .into(); // No need for `collect`, just convert directly to `PathBuf`
     let obj_file :Arc<Path>= file_path.into();
 
-    let arena = Arena::new();
-    let mut registry = AsmRegistry::new(&arena);
-    let mut code_files = CodeRegistry::new(&mut registry);
+    let asm_arena = Arena::new();
+    let code_arena = Arena::new();
+    let mut registry = AsmRegistry::new(&asm_arena);
+    let mut code_files = CodeRegistry::new(&mut registry,&code_arena);
     
     println!("visiting file {:?}",&*obj_file);
     code_files.visit_machine_file(obj_file.clone())?
@@ -50,19 +51,19 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
     state.dir_list_state.select(Some(0)); // Initialize the selected index
 
     loop {
-
         render_directory(&mut terminal, &mut state)?;
         match handle_directory_input(&mut state)? {
             DirResult::KeepGoing =>{},
-            DirResult::Exit =>{return Ok(());},
+            DirResult::Exit =>{return Ok(())},
             DirResult::File(mut f) =>{
+                
                 let path :Arc<Path>=  fs::canonicalize(Path::new(&f.file_path))?.into();
                 let code_file = code_files.get_source_file(path)?;
                 loop {
                     render_file_asm_viewer(&mut terminal, &mut f,code_file,obj_file.clone())?;
                     match handle_file_input(&mut f,code_file,obj_file.clone())? {
                         FileResult::KeepGoing=>{},
-                        FileResult::Dir => {break;}
+                        FileResult::Dir => {break}
                         FileResult::Exit => {return Ok(())},
                         
                     }
@@ -181,7 +182,7 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer)?;
+        let machine_file = MachineFile::parse(&buffer)?;
         let debug = machine_file.load_dwarf().ok().and_then(|dwarf_data| {
             addr2line::Context::from_arc_dwarf(dwarf_data).ok()
         });

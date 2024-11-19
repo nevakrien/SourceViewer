@@ -180,6 +180,10 @@ impl CodeFile {
         }) 
     }
 
+    pub fn read_arena<'r>(path: &Path,arena: &'r Arena<CodeFile>,) -> Result<&'r mut Self ,Box<dyn Error>>{
+        Ok(arena.alloc(CodeFile::read(path)?))
+    }
+
     #[inline]
     pub fn get_asm(&self,line:&u32,path:Arc<Path>) -> Option<&[InstructionDetail]> {
         self.asm.get(line)?.get(&path).map(|x| x.as_slice())//.unwrap_or(&[])
@@ -187,39 +191,45 @@ impl CodeFile {
 }
 
 pub struct CodeRegistry<'data,'r> {
-    pub source_files :HashMap<Arc<Path>,Result<CodeFile,Box<WrapedError>>>,
-    asm:&'r mut AsmRegistry<'data>
+    pub source_files :HashMap<Arc<Path>,Result<&'r CodeFile,Box<WrapedError>>>,
+    asm:&'r mut AsmRegistry<'data>,
+    arena: &'r Arena<CodeFile>,
     // pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
 }
 
 
-pub fn make_context<'data>(machine_file:&mut MachineFile<'data>) -> Result<Context<EndianSlice<'data,RunTimeEndian>>,Box<dyn Error>> {
+pub fn make_context<'data>(machine_file:&MachineFile<'data>) -> Result<Context<EndianSlice<'data,RunTimeEndian>>,Box<dyn Error>> {
     Ok(Context::from_arc_dwarf(machine_file.load_dwarf()?)?)
 }
 
 impl<'data,'r> CodeRegistry<'data,'r> {
-    pub fn new(asm:&'r mut AsmRegistry<'data>) -> Self {
+    pub fn new(asm:&'r mut AsmRegistry<'data>,arena: &'r Arena<CodeFile>,) -> Self {
         CodeRegistry {
             asm,
+            arena,
             source_files : HashMap::new(),
         }
     }
-    pub fn get_existing_source_file<'me>(&'me self,path : &Arc<Path>) -> Result<&'me CodeFile,Box<dyn Error>>{
-        self.source_files.get(path).unwrap().as_ref().map_err(|e| e.clone().into())
+    pub fn get_existing_source_file(&self,path : &Arc<Path>) -> Result<&'r CodeFile,Box<dyn Error>>{
+        self.source_files.get(path).unwrap().as_ref().map_err(|e| e.clone().into()).copied()
     }
 
-    pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&mut CodeFile,Box<dyn Error>>{
+    pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&'r CodeFile,Box<dyn Error>>{
         match self.source_files.entry(path.clone()) {
-            hash_map::Entry::Occupied(entry)=> entry.into_mut().as_mut().map_err(|e| e.clone().into()),
+            hash_map::Entry::Occupied(entry)=> entry.get().clone().map_err(|e| e.clone().into()),
             hash_map::Entry::Vacant(entry) => {
-                let code_file = entry.insert(CodeFile::read(&path)
-                    .map_err(|e| Box::new(WrapedError::new(e)))
-                );
+                // let code_file = entry.insert(CodeFile::read_arena(&path,self.arena)
+                //     .map_err(|e| Box::new(WrapedError::new(e)))
+                // );
 
-               let code_file = match code_file {
+               let code_file = match CodeFile::read_arena(&path,self.arena) {
                     Ok(x) => x,
-                    Err(e) => {return Err((*e).clone().into());}
+                    Err(e) => {
+                        let err = Box::new(WrapedError::new(e));
+                        entry.insert(Err(err.clone()));
+                        return Err(err);
+                    }
                };
 
                 for (obj_path,res) in self.asm.map.iter_mut() {
@@ -258,201 +268,18 @@ impl<'data,'r> CodeRegistry<'data,'r> {
                 }
 
                 
+                entry.insert(Ok(code_file));
                 Ok(code_file)
             }
         }
     }
 
 
-    // pub fn get_source_file(&mut self,path : Arc<Path>) -> Result<&mut CodeFile,Box<dyn Error>>{
-    //     match self.source_files.entry(path.clone()) {
-    //         hash_map::Entry::Occupied(entry)=> entry.into_mut().as_mut().map_err(|e| e.clone().into()),
-    //         hash_map::Entry::Vacant(entry) => {
-    //             let code_file = entry.insert(CodeFile::read(&path)
-    //                 .map_err(|e| Box::new(WrapedError::new(e)))
-    //             );
-
-    //            let code_file = match code_file {
-    //                 Ok(x) => x,
-    //                 Err(e) => {return Err((*e).clone().into());}
-    //            };
-
-
-    //             for res in self.asm.map.values_mut() {
-    //                 let machine_file = match res {
-    //                     Ok(x) => x,
-    //                     Err(e) => {
-    //                         let error = StackedError::from_wraped(e.clone(),"while getting machine");
-    //                         code_file.errors.push((error,None));
-    //                         continue;
-    //                     }
-    //                 };
-    //                 let ctx = match make_context(machine_file) {
-    //                     Ok(x) =>x,
-    //                     Err(e) => {
-    //                         let error = StackedError::new(e,"while making context");
-    //                         code_file.errors.push((error,None));
-    //                         continue;
-                            
-    //                     }
-    //                 };
-
-    //                 for section in &machine_file.sections {
-    //                     match section {
-    //                         Section::Code(code_section) => {
-    //                             for instruction in &code_section.instructions {
-
-    //                                 match ctx.find_location(instruction.address) {
-    //                                     Err(e) => {
-    //                                         let error = StackedError::new(Box::new(e),"while reading instruction");
-    //                                         code_file.errors.push((error,None));                                        
-    //                                     }   
-    //                                     Ok(None)=> {},
-    //                                     Ok(Some(loc)) => 
-                                    
-
-    //                                     if let (Some(file_name),Some(line)) = (loc.file,loc.line){
-    //                                         // let file = match fs::canonicalize(Path::new(file_name)) {
-    //                                         //     Ok(file) =>file,
-    //                                         //     Err(_) => {
-    //                                         //         continue;
-    //                                         //     },
-    //                                         // };
-
-    //                                         let file = Path::new(file_name);
-
-    //                                         if *file!=*path {
-    //                                             continue;
-    //                                         }
-    //                                         // let x = Instruction {
-    //                                         //     detail: instruction.clone(),
-    //                                         //     file: path.clone()
-    //                                         // };
-
-    //                                         code_file.asm.entry(line).or_default().push(instruction.clone());
-
-    //                                     }
-
-    //                                 }
-    //                             }  
-    //                         },
-    //                         Section::Info(_) =>{}
-    //                     }
-    //                 }
-                    
-    //             }
-
-                
-    //             Ok(code_file)
-    //         }
-    //     }
-    // }
 
     pub fn visit_machine_file(&mut self,path : Arc<Path>) -> Result<&mut MachineFile<'data>,Box<dyn Error>>{
         self.asm.get_machine(path)
     }
 }
-// impl CodeRegistry {
-//     pub fn new() -> Self {
-//         CodeRegistry::default()
-//     }
-
-//     pub fn get_source_file(&mut self,path : &Path) -> Result<&CodeFile,Box<dyn Error>>{
-//         self.visit_source_file(path)?;
-//         self.source_files.get(path).ok_or("failed to retrive source file".into())
-//     }
-
-//     pub fn visit_source_file(&mut self,path : &Path) -> Result<(),Box<dyn Error>>{
-//         self._visit_source_file(path.into())
-//     }
-
-//     // pub fn _visit_source_file(&mut self,path : Arc<Path>) -> Result<(),Box<dyn Error>>{
-//     //     if !self.visited.insert(path.clone()) {
-//     //         return Ok(());
-//     //     }
-
-//     //     let f = CodeFile::read(&path)?;
-//     //     self.source_files.insert(path,f);
-//     //     Ok(())
-//     // }
-//     pub fn _visit_source_file(&mut self, path: Arc<Path>) -> Result<(), Box<dyn Error>> {
-//         // Attempt to insert a new entry if the path is not already present
-//         if let std::collections::hash_map::Entry::Vacant(e) = self.source_files.entry(path.clone()) {
-//             let f = CodeFile::read(&path)?;
-//             e.insert(f); // Insert the file into the map
-//         }
-//         Ok(())
-//     }
-
-
-//     pub fn visit_machine_file(&mut self,path : Arc<Path>
-//         if !self.visited.insert(path.clone()) {
-//             return Ok(());
-//         }
-
-//         //read and parse the file
-//         let machine_file = asm.get_machine(path.clone()).map_err(|_e| "failed loading machine file")?;
-//         let ctx = Context::from_dwarf(machine_file.load_dwarf().map_err(|_e| "failed load dwarf")?).map_err(|_e| "failed making ctx")?;
-
-
-//         for section in &machine_file.sections {
-//             match section {
-//                 Section::Code(code_section) => {
-//                     for instruction in &code_section.instructions {
-                        
-//                         //ignore missing but not invalid
-//                         if let Some(loc) = ctx.find_location(instruction.address).map_err(|_e| "failed finding location")?{
-//                             if let (Some(file_name),Some(line)) = (loc.file,loc.line){
-                                
-//                                 //TODO: this needs fixing!!!!
-//                                 let file :Arc<Path>= match fs::canonicalize(Path::new(file_name)) {
-//                                     Ok(file) =>file.into(),
-//                                     Err(_) => {
-//                                         println!("{}",format!("{:?} does not exist",file_name ).red());
-//                                         continue;
-//                                     },
-//                                 };
-//                                 if self._visit_source_file(file.clone()).is_err( ){
-//                                     println!("{}", format!("failed finding related source file {}",file.to_string_lossy()).red());
-//                                     continue;
-//                                 } else {
-//                                     println!("loaded {}",file.to_string_lossy());
-
-//                                 }
-
-//                                 // let file = match self.source_files.get_mut(&file) {
-//                                 //     Some(file) => file,
-//                                 //     None => {
-//                                 //         //not sure how this can even triger
-//                                 //         println!("error happened with {}",file.to_string_lossy());
-//                                 //         continue;
-//                                 //     }
-//                                 // };
-
-//                                 // self._visit_source_file(file.clone()).map_err(|_e| format!("failed finding related source files {}",file.to_string_lossy()))?;
-//                                 let file = self.source_files.get_mut(&file).unwrap();
-
-//                                 //insert
-//                                 let x = Instruction {
-//                                     detail: instruction.clone(),
-//                                     file: path.clone()
-//                                 };
-
-//                                 file.asm.entry(line).or_default().push(x);
-
-//                             }
-//                         }
-//                     }
-//                 },
-//                 _ => {},
-//             }
-//         } ;
-//         // todo!()
-//         Ok(())
-
-//     }
-// }
-
 
 
 pub struct DebugInstruction<'a>{
