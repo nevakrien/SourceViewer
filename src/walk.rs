@@ -11,11 +11,12 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 use tui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout,Rect,Alignment},
     style::{Color, Modifier, Style},
     text::{Span, Spans},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, Borders, List, ListItem, ListState,Paragraph},
     Terminal,
+    Frame,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::execute;
@@ -30,12 +31,6 @@ impl Drop for TerminalCleanup {
     }
 }
 
-#[derive(PartialEq,Clone,Debug)]
-pub enum Mode {
-    Dir,
-    File,
-}
-
 pub struct GlobalState<'arena> {
     current_dir: PathBuf,
     original_dir: PathBuf,
@@ -48,8 +43,7 @@ pub struct GlobalState<'arena> {
     // asm_cursor: usize,
     cur_asm: u64,
 
-
-
+    help_toggle:bool,
 }
 
 
@@ -81,6 +75,8 @@ impl<'arena> GlobalState<'arena> {
 
             // asm_cursor:0,
             cur_asm:0,
+
+            help_toggle:false,
 
             // asm_lines: BTreeMap::default()
         };
@@ -262,6 +258,10 @@ pub fn render_directory(
         f.render_stateful_widget(list, layout[0], &mut state.dir_list_state);
         let asm_lines = layout[1].height.saturating_sub(2) as usize;
         f.render_widget(make_assembly_inner(state,asm_lines), layout[1]);
+
+        if state.help_toggle {
+            render_dir_help_popup(f)
+        }
     })?;
     Ok(())
 }
@@ -277,8 +277,19 @@ pub fn handle_directory_input<'me,'arena>(
     state: &'me mut GlobalState<'arena>,
 ) -> Result<DirResult<'me,'arena>, Box<dyn std::error::Error>> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+        if state.help_toggle{
+            if code == KeyCode::Char('h'){
+                state.help_toggle=false;
+            } else if code == KeyCode::Char('q') {
+                return Ok(DirResult::Exit);
+            }
+
+            return  Ok(DirResult::KeepGoing);
+        }
+
         match code {
             KeyCode::Char('q') => return Ok(DirResult::Exit),
+            KeyCode::Char('h') => {state.help_toggle=true;},
             KeyCode::Down  => {
                 let i = match state.dir_list_state.selected() {
                     Some(i) => (i + 1) % state.dir_entries.len(),
@@ -352,8 +363,18 @@ pub enum FileResult {
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
 pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'arena CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
     if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+        if state.global.help_toggle{
+            if code == KeyCode::Char('h'){
+                state.global.help_toggle=false;
+            } else if code == KeyCode::Char('q') {
+                return Ok(FileResult::Exit);
+            }
+            return  Ok(FileResult::KeepGoing);
+        }
+
         match code {
             KeyCode::Char('q') => return Ok(FileResult::Exit),
+            KeyCode::Char('h') => {state.global.help_toggle=true;},
             KeyCode::Char('w') => {
                 state.global.asm_up()
             }
@@ -467,6 +488,8 @@ pub fn render_file_asm_viewer(
 
 ) -> Result<(), Box<dyn std::error::Error>> {
     terminal.draw(|f| {
+        clear_entire_screen(f);
+
         let size = f.size();
 
         // Layout: Split vertically for source and assembly (if selected)
@@ -516,7 +539,13 @@ pub fn render_file_asm_viewer(
 
         let asm_lines = layout[1].height.saturating_sub(2) as usize;
         f.render_widget(make_assembly_inner(state.global,asm_lines), layout[1]);
+
+        if state.global.help_toggle {
+            render_help_popup(f);
+        }
     })?;
+
+    
     Ok(())
 }
 
@@ -632,4 +661,96 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
             }
         }
     }
+}
+
+use tui::widgets::Clear;
+pub fn clear_entire_screen<B: tui::backend::Backend>(frame: &mut tui::Frame<B>) {
+    let entire_area = frame.size(); // Get the entire terminal size
+    frame.render_widget(Clear, entire_area);
+}
+
+pub fn render_popup(
+    frame: &mut Frame<CrosstermBackend<io::Stdout>>,
+    title: &str,
+    content: &[&str],
+    width_percent: u16,
+    height_percent: u16,
+) {
+    // Calculate centered area
+    let terminal_size = frame.size();
+    let popup_width = terminal_size.width * width_percent / 100;
+    let popup_height = terminal_size.height * height_percent / 100;
+    let popup_x = terminal_size.x + (terminal_size.width - popup_width) / 2;
+    let popup_y = terminal_size.y + (terminal_size.height - popup_height) / 2;
+    let area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+    // Clear the popup area
+    frame.render_widget(Clear, area);
+
+    // Create the popup block
+    let block = Block::default()
+        .title(Span::styled(
+            title,
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ))
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Black).fg(Color::White));
+
+    let paragraph = Paragraph::new(content.iter().map(|line| Spans::from(*line)).collect::<Vec<_>>())
+        .block(block)
+        .alignment(Alignment::Left); // Use left alignment for help content
+
+    // Render the popup
+    frame.render_widget(paragraph, area);
+}
+
+
+pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
+    let help_content = [
+        "Help - File Input Behavior",
+        "",
+        "Navigation:",
+        "  Up Arrow   - Move cursor up",
+        "  Down Arrow - Move cursor down",
+        "",
+        "Selection:",
+        "  Enter      - Toggle selection of the current line",
+        "              and load/unload associated assembly",
+        "",
+        "Assembly View:",
+        "  w          - Scroll assembly view up",
+        "  s          - Scroll assembly view down",
+        "  l          - Toggle line numbers",
+        "",
+        "Other Commands:",
+        "  h          - Show this",
+        "  q          - Quit file viewer",
+        "  Esc        - Return to directory view",
+    ];
+
+    render_popup(frame, "Help", &help_content, 50, 50); // 50% width, 50% height
+}
+
+pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
+    let help_content = [
+        "Help - Directory Navigation",
+        "",
+        "Navigation:",
+        "  Up Arrow   - Move selection up",
+        "  Down Arrow - Move selection down",
+        "",
+        "Directory Actions:",
+        "  Enter      - Open selected directory or file",
+        "  Esc        - Navigate to parent directory",
+        "",
+        "Assembly View:",
+        "  w          - Scroll assembly view up",
+        "  s          - Scroll assembly view down",
+        "",
+        "Other Commands:",
+        "  h          - Show this help",
+        "  q          - Quit the application",
+    ];
+
+    render_popup(frame, "Help", &help_content, 50, 50); // 50% width, 50% height
 }
