@@ -7,7 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/nevakrien/source_viewer"
 readme = "README.md"
 keywords = ["CLI", "debug", "DWARF", "binary", "analysis"]
-categories = ["command-line-utilities", "debugging"]
+categories = ["command-line-utilities"]
 authors = ["Your Name <youremail@example.com>"]
 
 [[bin]]
