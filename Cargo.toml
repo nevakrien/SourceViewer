@@ -2,6 +2,13 @@
 name = "source_viewer"
 version = "0.1.0"
 edition = "2021"
+description = "A CLI tool to inspect and analyze binary sources using DWARF debugging information."
+license = "Apache-2.0"
+repository = "https://github.com/yourusername/source_viewer"
+readme = "README.md"
+keywords = ["CLI", "debug", "DWARF", "binary", "analysis"]
+categories = ["command-line-utilities", "debugging"]
+authors = ["Your Name <youremail@example.com>"]
 
 [[bin]]
 name = "SourceViewer"
@@ -12,15 +19,8 @@ addr2line = "0.24.2"
 capstone = "0.12.0"
 clap = "4.5.21"
 colored = "2.1.0"
-# crossbeam = "0.8.4"
 crossterm = "0.28.1"
-# fallible-iterator = "0.3.0"
-# getopts = "0.2.21"
 gimli = { version = "0.31.1", features = ["read"] }
 object = "0.36.5"
-# memmap2 = "0.9.5"
-# num_cpus = "1.16.0"
-# object = "0.36.5"
-# regex = "1.11.1"
 tui = "0.19.0"
 typed-arena = "2.0.2"

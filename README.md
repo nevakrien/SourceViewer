@@ -1,5 +1,5 @@
 # SourceViewer
-assembly viewing tool
+assembly viewing tool (this was a pet project but i found myself actually reaching for it so here i am publishing)
 
 the goal is to allow viewing dissasmblies from the perspective of the source file without taking over your compilation setup.
 
