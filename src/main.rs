@@ -8,7 +8,8 @@ use source_viewer::subcommands::*;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut command = Command::new("Source Viewer")
-        .version("0.2")
+        // .version("0.1.2")
+        .version(env!("CARGO_PKG_VERSION"))
         .author("Neva Krien")
         .about("A tool for viewing assembly and source information in binary files")
         

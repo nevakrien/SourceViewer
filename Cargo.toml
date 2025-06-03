@@ -1,6 +1,6 @@
 [package]
 name = "source_viewer"
-version = "0.2"
+version = "0.1.2"
 edition = "2021"
 description = "A CLI tool to inspect and analyze binary sources using DWARF debugging information."
 license = "Apache-2.0"
