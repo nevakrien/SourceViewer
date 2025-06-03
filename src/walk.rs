@@ -439,27 +439,10 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'a
     Ok(FileResult::KeepGoing)
 }
 
-
-// fn read_file_lines(path: &Path) -> io::Result<Vec<Line<'static>>> {
-//     let file = File::open(path)?;
-//     let reader = io::BufReader::new(file);
-//     Ok(reader.lines().map_while(Result::ok)
-//         .enumerate()
-//         .map(|(i, s)|
-//             Line::new(s,i+1)
-//         )
-
-//         .collect())
-// }
-/// Expand tabs and strip control characters (CR, BEL, VT, etc.).
+/// make text consistently renderble
 fn sanitise(mut s: String) -> String {
-    // 1. Replace TAB with two spaces
-
-    // 2. Drop every remaining ASCII control char (0x00-0x1F, 0x7F)
     s.retain(|c| !c.is_control());
     s = s.replace('\t', "  ");
-    
-
     s
 }
 
@@ -592,7 +575,7 @@ fn make_assembly_inner<'a>(state: &GlobalState,max_visible_lines:usize) -> List<
         if ins.serial_number as isize != prev+1{
             asm_items.push(
                 ListItem::new(
-                vec![Spans::from("DETATCH")]
+                vec![Spans::from("...")]
                 )
                 .style(Style::default().fg(Color::Red))
             )
