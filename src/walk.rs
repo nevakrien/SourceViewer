@@ -440,15 +440,38 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'a
 }
 
 
-fn read_file_lines(path: &Path) -> io::Result<Vec<Line<'static>>> {
-    let file = File::open(path)?;
-    let reader = io::BufReader::new(file);
-    Ok(reader.lines().map_while(Result::ok)
-        .enumerate()
-        .map(|(i, s)|
-            Line::new(s,i+1)
-        )
+// fn read_file_lines(path: &Path) -> io::Result<Vec<Line<'static>>> {
+//     let file = File::open(path)?;
+//     let reader = io::BufReader::new(file);
+//     Ok(reader.lines().map_while(Result::ok)
+//         .enumerate()
+//         .map(|(i, s)|
+//             Line::new(s,i+1)
+//         )
 
+//         .collect())
+// }
+/// Expand tabs and strip control characters (CR, BEL, VT, etc.).
+fn sanitise(mut s: String) -> String {
+    // 1. Replace TAB with two spaces
+
+    // 2. Drop every remaining ASCII control char (0x00-0x1F, 0x7F)
+    s.retain(|c| !c.is_control());
+    s = s.replace('\t', "  ");
+    
+
+    s
+}
+
+fn read_file_lines(path: &Path) -> io::Result<Vec<Line<'static>>> {
+    let file   = File::open(path)?;
+    let reader = io::BufReader::new(file);
+
+    Ok(reader
+        .lines()
+        .map_while(Result::ok)
+        .enumerate()
+        .map(|(i, s)| Line::new(sanitise(s), i + 1))
         .collect())
 }
 

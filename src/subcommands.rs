@@ -293,6 +293,8 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         }
     }
 
+    source_files.sort();
+
     if walk {
         let obj_file :Arc<Path>= file_path.as_path().into();
         let asm_arena = Arena::new();
