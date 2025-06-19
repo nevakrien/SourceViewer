@@ -183,7 +183,7 @@ impl<'a> MachineFile<'a> {
        Ok(dwarf)
     }
 
-    pub fn parse(buffer: &'a[u8]) -> Result<MachineFile, Box<dyn Error>>{
+    pub fn parse(buffer: &'a[u8]) -> Result<MachineFile<'a>, Box<dyn Error>>{
         let obj = object::File::parse(buffer)?;
         let arch = obj.architecture();
         let mut cs = create_capstone(&arch)?;

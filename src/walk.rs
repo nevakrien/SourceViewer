@@ -366,7 +366,12 @@ pub enum FileResult {
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
 pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'arena CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
     match event::read()? {
-        Event::Key(KeyEvent { code, .. }) => {
+        Event::Key(KeyEvent { code, kind, .. }) => {
+            if crossterm::event::KeyEventKind::Release == kind {
+                // Ignore key releases (We hate Windows!)
+                return Ok(FileResult::KeepGoing);
+            }
+
             if state.global.help_toggle{
                 if code == KeyCode::Char('h'){
                     state.global.help_toggle=false;
