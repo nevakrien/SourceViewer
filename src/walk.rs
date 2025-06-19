@@ -280,26 +280,6 @@ pub fn handle_directory_input<'me,'arena>(
     state: &'me mut GlobalState<'arena>,
 ) -> Result<DirResult<'me,'arena>, Box<dyn std::error::Error>> {
     match event::read()? {
-        Event::Mouse(MouseEvent { kind, .. }) => {
-            match kind {
-                MouseEventKind::ScrollDown => {
-                    let i = match state.dir_list_state.selected() {
-                        Some(i) => (i + 1) % state.dir_entries.len(),
-                        None => 0,
-                    };
-                    state.dir_list_state.select(Some(i));
-                }
-                MouseEventKind::ScrollUp => {
-                    let i = match state.dir_list_state.selected() {
-                        Some(i) => if i == 0 { state.dir_entries.len() - 1 } else { i - 1 },
-                        None => 0,
-                    };
-                    state.dir_list_state.select(Some(i));
-                }
-                _ => {}
-            }
-            return Ok(DirResult::KeepGoing);
-        }
         Event::Key(KeyEvent { code, kind, .. }) => {
             if crossterm::event::KeyEventKind::Release == kind  {
                 // Ignore key releases (We hate Windows!)
@@ -354,6 +334,26 @@ pub fn handle_directory_input<'me,'arena>(
                 }
                 _ => {}
             }
+        }
+        Event::Mouse(MouseEvent { kind, .. }) => {
+            match kind {
+                MouseEventKind::ScrollDown => {
+                    let i = match state.dir_list_state.selected() {
+                        Some(i) => (i + 1) % state.dir_entries.len(),
+                        None => 0,
+                    };
+                    state.dir_list_state.select(Some(i));
+                }
+                MouseEventKind::ScrollUp => {
+                    let i = match state.dir_list_state.selected() {
+                        Some(i) => if i == 0 { state.dir_entries.len() - 1 } else { i - 1 },
+                        None => 0,
+                    };
+                    state.dir_list_state.select(Some(i));
+                }
+                _ => {}
+            }
+            return Ok(DirResult::KeepGoing);
         }
         _ => {}
     }
