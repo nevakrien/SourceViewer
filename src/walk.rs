@@ -1,12 +1,11 @@
 use crate::program_context::CodeRegistry;
 use core::cmp::min;
 use std::collections::BTreeMap;
-use std::fs;
+use std::{fs, fs::File};
 use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeFile;
 use crate::file_parser::InstructionDetail;
-use std::fs::File;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 use tui::{
@@ -18,14 +17,14 @@ use tui::{
     Terminal,
     Frame,
 };
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use crossterm::execute;
-
 
 pub struct TerminalCleanup;
 
 impl Drop for TerminalCleanup {
     fn drop(&mut self) {
+        execute!(io::stdout(), DisableMouseCapture).unwrap();
         let _ = crossterm::terminal::disable_raw_mode();
         let _ = execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
     }
@@ -212,6 +211,7 @@ impl<'data> Line<'data> {
 pub fn create_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, io::Error> {
     execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
     crossterm::terminal::enable_raw_mode()?;
+    execute!(io::stdout(), EnableMouseCapture)?;
     let backend = CrosstermBackend::new(io::stdout());
     Terminal::new(backend)
 }
@@ -362,79 +362,104 @@ pub enum FileResult {
 
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
 pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'arena CodeFile,obj_path: Arc<Path> ) -> Result<FileResult, io::Error> {
-    if let Event::Key(KeyEvent { code, .. }) = event::read()? {
-        if state.global.help_toggle{
-            if code == KeyCode::Char('h'){
-                state.global.help_toggle=false;
-            } else if code == KeyCode::Char('q') {
-                return Ok(FileResult::Exit);
+    match event::read()? {
+        Event::Key(KeyEvent { code, .. }) => {
+            if state.global.help_toggle{
+                if code == KeyCode::Char('h'){
+                    state.global.help_toggle=false;
+                } else if code == KeyCode::Char('q') {
+                    return Ok(FileResult::Exit);
+                }
+                return  Ok(FileResult::KeepGoing);
             }
-            return  Ok(FileResult::KeepGoing);
+
+            match code {
+                KeyCode::Char('q') => return Ok(FileResult::Exit),
+                KeyCode::Char('h') => {state.global.help_toggle=true;},
+                KeyCode::Char('w') => {
+                    state.global.asm_up()
+                }
+                KeyCode::Char('s') => {
+                    state.global.asm_down()
+                }
+                KeyCode::Up  => {
+                    if state.cursor > 0 {
+                        state.cursor -= 1;
+
+                        // Scroll up if cursor is above the visible range
+                        if state.cursor < state.file_scroll {
+                            state.file_scroll = state.cursor;
+                        }
+
+                    }
+                }
+                KeyCode::Down  => {
+                    if state.cursor < state.file_content.len().saturating_sub(1) {
+                        state.cursor += 1;
+
+                        // Scroll down if cursor goes below the visible range
+                        let max_visible_lines = state.file_content.len().saturating_sub(1);
+                        if state.cursor >= state.file_scroll + max_visible_lines {
+                            state.file_scroll = state.cursor - max_visible_lines + 1;
+                        }
+                    }
+
+                },
+                KeyCode::Enter => {
+                    // Toggle selection of the current line under the cursor
+                    if let Some(line) = state.file_content.get_mut(state.cursor) {
+                        line.is_selected = !line.is_selected;
+                        let info = line.load_debug(code_file,obj_path);
+
+
+                        if line.is_selected{    
+                            state.global.add_asm_line(info)
+                        }else {
+                            state.global.remove_asm_line(info)
+
+                        }
+
+                    } else {
+                        unreachable!();
+                    }
+                }
+                KeyCode::Char('l') => state.global.show_lines = !state.global.show_lines,
+                KeyCode::Esc => {return Ok(FileResult::Dir);},
+
+                _ => {}
+            }
         }
+        Event::Mouse(MouseEvent {kind, ..} )  => {
+            match kind {
+                MouseEventKind::ScrollDown => {
+                    if state.cursor < state.file_content.len().saturating_sub(1) {
+                        state.cursor += 1;
 
-        match code {
-            KeyCode::Char('q') => return Ok(FileResult::Exit),
-            KeyCode::Char('h') => {state.global.help_toggle=true;},
-            KeyCode::Char('w') => {
-                state.global.asm_up()
-            }
-
-            KeyCode::Char('s') => {
-                state.global.asm_down()
-            }
-
-            KeyCode::Up  => {
-                if state.cursor > 0 {
-                    state.cursor -= 1;
-
-                    // Scroll up if cursor is above the visible range
-                    if state.cursor < state.file_scroll {
-                        state.file_scroll = state.cursor;
-                    }
-
-                }
-            }
-
-            
-
-            KeyCode::Down  => {
-                if state.cursor < state.file_content.len().saturating_sub(1) {
-                    state.cursor += 1;
-
-                    // Scroll down if cursor goes below the visible range
-                    let max_visible_lines = state.file_content.len().saturating_sub(1);
-                    if state.cursor >= state.file_scroll + max_visible_lines {
-                        state.file_scroll = state.cursor - max_visible_lines + 1;
+                        // Scroll down if cursor goes below the visible range
+                        let max_visible_lines = state.file_content.len().saturating_sub(1);
+                        if state.cursor >= state.file_scroll + max_visible_lines {
+                            state.file_scroll = state.cursor - max_visible_lines + 1;
+                        }
                     }
                 }
+                MouseEventKind::ScrollUp => {
+                    if state.cursor > 0 {
+                        state.cursor -= 1;
 
-            },
-
-            KeyCode::Enter => {
-                // Toggle selection of the current line under the cursor
-                if let Some(line) = state.file_content.get_mut(state.cursor) {
-                    line.is_selected = !line.is_selected;
-                    let info = line.load_debug(code_file,obj_path);
-
-
-                    if line.is_selected{    
-                        state.global.add_asm_line(info)
-                    }else {
-                        state.global.remove_asm_line(info)
+                        // Scroll up if cursor is above the visible range
+                        if state.cursor < state.file_scroll {
+                            state.file_scroll = state.cursor;
+                        }
 
                     }
-
-                } else {
-                    unreachable!();
                 }
+                _ => {}
             }
-
-            KeyCode::Char('l') => state.global.show_lines = !state.global.show_lines,
-
-            KeyCode::Esc => {return Ok(FileResult::Dir);},
-
-            _ => {}
         }
+        _ => {
+    }
+
+
     }
     Ok(FileResult::KeepGoing)
 }
@@ -650,7 +675,6 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
             }
         }
     }
-
     // File loop to display and navigate files
     pub fn walk_file_loop(
         terminal : &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -658,6 +682,7 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
+
         loop {
             render_file_asm_viewer(terminal, file_state)?;
             let res = handle_file_input(file_state, code_file, obj_file.clone())?;
