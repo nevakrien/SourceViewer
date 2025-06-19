@@ -1,7 +1,8 @@
 use crate::program_context::CodeRegistry;
 use core::cmp::min;
 use std::collections::BTreeMap;
-use std::{fs, fs::File};
+use std::time::Duration;
+use std::{fs, fs::File, thread};
 use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeFile;
@@ -19,6 +20,8 @@ use tui::{
 };
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use crossterm::execute;
+
+const TERMINAL_FPS: u64 = 30; // Frames per second for terminal updates
 
 pub struct TerminalCleanup;
 
@@ -276,72 +279,85 @@ pub enum DirResult<'me,'arena> {
 pub fn handle_directory_input<'me,'arena>(
     state: &'me mut GlobalState<'arena>,
 ) -> Result<DirResult<'me,'arena>, Box<dyn std::error::Error>> {
-    if let Event::Key(KeyEvent { code, kind, .. }) = event::read()? {
-        if crossterm::event::KeyEventKind::Release == kind {
-            // Ignore key releases (We hate Windows!)
+    match event::read()? {
+        Event::Mouse(MouseEvent { kind, .. }) => {
+            match kind {
+                MouseEventKind::ScrollDown => {
+                    let i = match state.dir_list_state.selected() {
+                        Some(i) => (i + 1) % state.dir_entries.len(),
+                        None => 0,
+                    };
+                    state.dir_list_state.select(Some(i));
+                }
+                MouseEventKind::ScrollUp => {
+                    let i = match state.dir_list_state.selected() {
+                        Some(i) => if i == 0 { state.dir_entries.len() - 1 } else { i - 1 },
+                        None => 0,
+                    };
+                    state.dir_list_state.select(Some(i));
+                }
+                _ => {}
+            }
             return Ok(DirResult::KeepGoing);
         }
-
-        if state.help_toggle{
-            if code == KeyCode::Char('h'){
-                state.help_toggle=false;
-            } else if code == KeyCode::Char('q') {
-                return Ok(DirResult::Exit);
+        Event::Key(KeyEvent { code, kind, .. }) => {
+            if crossterm::event::KeyEventKind::Release == kind  {
+                // Ignore key releases (We hate Windows!)
+                return Ok(DirResult::KeepGoing);
             }
+            match code {
+                KeyCode::Char('q') => return Ok(DirResult::Exit),
+                KeyCode::Char('h') => {state.help_toggle=true;},
+                KeyCode::Down  => {
+                    let i = match state.dir_list_state.selected() {
+                        Some(i) => (i + 1) % state.dir_entries.len(),
+                        None => 0,
+                    };
+                    state.dir_list_state.select(Some(i));
+                }
+                KeyCode::Up  => {
+                    let i = match state.dir_list_state.selected() {
+                        Some(i) => if i == 0 { state.dir_entries.len() - 1 } else { i - 1 },
+                        None => 0,
+                    };
+                    state.dir_list_state.select(Some(i));
+                }
 
-            return  Ok(DirResult::KeepGoing);
-        }
+                KeyCode::Char('w') => {
+                    state.asm_up()
+                }
 
-        match code {
-            KeyCode::Char('q') => return Ok(DirResult::Exit),
-            KeyCode::Char('h') => {state.help_toggle=true;},
-            KeyCode::Down  => {
-                let i = match state.dir_list_state.selected() {
-                    Some(i) => (i + 1) % state.dir_entries.len(),
-                    None => 0,
-                };
-                state.dir_list_state.select(Some(i));
-            }
-            KeyCode::Up  => {
-                let i = match state.dir_list_state.selected() {
-                    Some(i) => if i == 0 { state.dir_entries.len() - 1 } else { i - 1 },
-                    None => 0,
-                };
-                state.dir_list_state.select(Some(i));
-            }
+                KeyCode::Char('s') => {
+                    state.asm_down()
+                }
 
-            KeyCode::Char('w') => {
-                state.asm_up()
-            }
+                KeyCode::Enter => {
+                    if let Some(i) = state.dir_list_state.selected() {
+                        let path = state.dir_entries[i].path();
+                        if path.is_dir() {
+                            state.current_dir = path;
+                            load_dir(state)?;
+                            state.dir_list_state.select(Some(0));
+                        } else if path.is_file() {
+                            return Ok(DirResult::File(load_file(state,&path)?));
 
-            KeyCode::Char('s') => {
-                state.asm_down()
-            }
-
-            KeyCode::Enter => {
-                if let Some(i) = state.dir_list_state.selected() {
-                    let path = state.dir_entries[i].path();
-                    if path.is_dir() {
-                        state.current_dir = path;
-                        load_dir(state)?;
-                        state.dir_list_state.select(Some(0));
-                    } else if path.is_file() {
-                        return Ok(DirResult::File(load_file(state,&path)?));
-
+                        }
                     }
                 }
-            }
-            KeyCode::Esc => {
-                if state.current_dir != state.original_dir {
-                    if let Some(parent) = state.current_dir.parent() {
-                        state.current_dir = parent.to_path_buf();
-                        state.dir_list_state.select(Some(0));
+                KeyCode::Esc => {
+                    if state.current_dir != state.original_dir {
+                        if let Some(parent) = state.current_dir.parent() {
+                            state.current_dir = parent.to_path_buf();
+                            state.dir_list_state.select(Some(0));
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
+        _ => {}
     }
+
     Ok(DirResult::KeepGoing)
 }
 
@@ -466,10 +482,7 @@ pub fn handle_file_input<'arena>(state: &mut FileState<'_,'arena>,code_file: &'a
                 _ => {}
             }
         }
-        _ => {
-    }
-
-
+        _ => {}
     }
     Ok(FileResult::KeepGoing)
 }
@@ -692,14 +705,19 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
+        let loop_duration = Duration::from_millis(1000 / TERMINAL_FPS);
 
         loop {
+            let frame_start_time = std::time::Instant::now();
+
             render_file_asm_viewer(terminal, file_state)?;
             let res = handle_file_input(file_state, code_file, obj_file.clone())?;
             match  res{
                 FileResult::KeepGoing => {},
                 _ => {return Ok(res)}
             }
+            // Render at `TERMINAL_FPS` frames per second
+            thread::sleep(loop_duration.saturating_sub(frame_start_time.elapsed()));
         }
     }
 }
