@@ -21,7 +21,15 @@ use tui::{
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use crossterm::execute;
 
-const TERMINAL_FPS: u64 = 30; // Frames per second for terminal updates
+const ACTIONS_PER_SECOND: u64 = 30; // Frames per second for terminal updates
+
+// Drain all buffered events before sleeping
+fn flush_pending_events() -> std::io::Result<()> {
+    while event::poll(Duration::ZERO)? {
+        let _ = event::read(); // Just consume the event
+    }
+    Ok(())
+}
 
 pub struct TerminalCleanup;
 
@@ -675,7 +683,12 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         code_files: &mut CodeRegistry<'_,'arena>,
         obj_file: Arc<Path>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let loop_duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
+        
         loop {
+            let frame_start_time = std::time::Instant::now();
+
+
             render_directory(&mut self.terminal, self.state)?;
 
             let terminal = &mut self.terminal;
@@ -696,6 +709,9 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
                     }
                 }
             }
+            flush_pending_events()?;
+            thread::sleep(loop_duration.saturating_sub(frame_start_time.elapsed()));
+
         }
     }
     // File loop to display and navigate files
@@ -705,7 +721,7 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
-        let loop_duration = Duration::from_millis(1000 / TERMINAL_FPS);
+        let loop_duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
 
         loop {
             let frame_start_time = std::time::Instant::now();
@@ -716,7 +732,8 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
                 FileResult::KeepGoing => {},
                 _ => {return Ok(res)}
             }
-            // Render at `TERMINAL_FPS` frames per second
+            // Render at `ACTIONS_PER_SECOND` frames per second
+            flush_pending_events()?;
             thread::sleep(loop_duration.saturating_sub(frame_start_time.elapsed()));
         }
     }
