@@ -1,8 +1,7 @@
 use crate::program_context::CodeRegistry;
 use core::cmp::min;
 use std::collections::BTreeMap;
-use std::time::Duration;
-use std::{fs, fs::File, thread};
+use std::{fs, fs::File};
 use std::sync::Arc;
 use std::path::Path;
 use crate::program_context::CodeFile;
@@ -20,8 +19,6 @@ use tui::{
 };
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use crossterm::execute;
-
-const TERMINAL_FPS: u64 = 30; // Frames per second for terminal updates
 
 pub struct TerminalCleanup;
 
@@ -279,7 +276,12 @@ pub enum DirResult<'me,'arena> {
 pub fn handle_directory_input<'me,'arena>(
     state: &'me mut GlobalState<'arena>,
 ) -> Result<DirResult<'me,'arena>, Box<dyn std::error::Error>> {
-    if let Event::Key(KeyEvent { code, .. }) = event::read()? {
+    if let Event::Key(KeyEvent { code, kind, .. }) = event::read()? {
+        if crossterm::event::KeyEventKind::Release == kind {
+            // Ignore key releases (We hate Windows!)
+            return Ok(DirResult::KeepGoing);
+        }
+
         if state.help_toggle{
             if code == KeyCode::Char('h'){
                 state.help_toggle=false;
@@ -690,19 +692,14 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
-        let loop_duration = Duration::from_millis(1000 / TERMINAL_FPS);
 
         loop {
-            let frame_start_time = std::time::Instant::now();
-
             render_file_asm_viewer(terminal, file_state)?;
             let res = handle_file_input(file_state, code_file, obj_file.clone())?;
             match  res{
                 FileResult::KeepGoing => {},
                 _ => {return Ok(res)}
             }
-            // Render at `TERMINAL_FPS` frames per second
-            thread::sleep(loop_duration.saturating_sub(frame_start_time.elapsed()));
         }
     }
 }
