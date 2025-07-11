@@ -8,7 +8,6 @@ repository = "https://github.com/nevakrien/SourceViewer"
 readme = "README.md"
 keywords = ["CLI", "debug", "DWARF", "binary", "analysis"]
 categories = ["command-line-utilities"]
-authors = ["Your Name <youremail@example.com>"]
 
 [[bin]]
 name = "SourceViewer"
