@@ -42,7 +42,7 @@ pub struct GlobalState<'arena> {
     original_dir: PathBuf,
     pub dir_list_state: ListState,
     dir_entries: Box<[std::fs::DirEntry]>,
-
+    
     show_lines: bool,
 
     selected_asm: BTreeMap<u64, &'arena InstructionDetail>, //address -> instructions

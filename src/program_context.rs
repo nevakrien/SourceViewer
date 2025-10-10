@@ -217,6 +217,11 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
             source_files: HashMap::new(),
         }
     }
+
+    pub fn format_inst_debug(&mut self,ins:&InstructionDetail,debug:&DebugContext<'data>)->String{
+        format_inst_debug(ins,debug,self.asm)
+    }
+
     pub fn get_existing_source_file(
         &self,
         path: &Arc<Path>,
@@ -296,9 +301,9 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
 
 pub fn format_inst_debug<'a, 'b: 'a, 'c>(
     ins: &InstructionDetail,
-    addr2line: &'c addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
+    addr2line: &'c DebugContext<'a>,
     registry: &mut AsmRegistry<'b>,
-) -> std::string::String {
+) -> String {
     format!(
         "{:#010x}: {:<6} {:<30} {}",
         ins.address,
@@ -310,7 +315,7 @@ pub fn format_inst_debug<'a, 'b: 'a, 'c>(
 
 // pub struct DebugInstruction<'b, 'a> {
 //     ins: InstructionDetail,
-//     addr2line: &'b addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
+//     addr2line: &'b DebugContext<'a>,
 //     //needs a way to load the Sup files which are machine files...
 //     //probably means we need the asm registry
 // }
@@ -318,7 +323,7 @@ pub fn format_inst_debug<'a, 'b: 'a, 'c>(
 // impl<'a, 'c> DebugInstruction<'c, 'a> {
 //     pub fn new(
 //         ins: InstructionDetail,
-//         addr2line: &'c addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
+//         addr2line: &'c DebugContext<'a>,
 //     ) -> Self {
 //         DebugInstruction { ins, addr2line }
 //     }
