@@ -1,3 +1,4 @@
+use std::time::Instant;
 use crate::walk::FileResult;
 use crate::walk::TerminalSession;
 use std::collections::HashMap;
@@ -335,7 +336,9 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         {
             let mut file_state = crate::walk::load_file(session.state,file_path)?;
             let code_file = code_files.get_source_file(file_path.into())?;
+            let mut last_frame = Instant::now();
             let res =TerminalSession::walk_file_loop(
+                &mut last_frame,
                 &mut session.terminal,
                 &mut file_state,
                 code_file,obj_file.clone()

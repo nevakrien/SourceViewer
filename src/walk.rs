@@ -1,3 +1,4 @@
+use std::time::Instant;
 use crate::program_context::CodeRegistry;
 use core::cmp::min;
 use std::collections::BTreeMap;
@@ -22,14 +23,8 @@ use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, Key
 use crossterm::execute;
 
 const ACTIONS_PER_SECOND: u64 = 30; // Frames per second for terminal updates
+const FRAME_MIN_TIME: Duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
 
-// Drain all buffered events before sleeping
-fn flush_pending_events() -> std::io::Result<()> {
-    while event::poll(Duration::ZERO)? {
-        let _ = event::read(); // Just consume the event
-    }
-    Ok(())
-}
 
 pub struct TerminalCleanup;
 
@@ -294,7 +289,10 @@ pub fn handle_directory_input<'me,'arena>(
                 return Ok(DirResult::KeepGoing);
             }
             match code {
-                KeyCode::Char('q') => return Ok(DirResult::Exit),
+                KeyCode::Char('q') => {
+                    // return Err("exiting normally".into());
+                    return Ok(DirResult::Exit)
+                },
                 KeyCode::Char('h') => {state.help_toggle=true;},
                 KeyCode::Down  => {
                     let i = match state.dir_list_state.selected() {
@@ -662,6 +660,30 @@ pub struct TerminalSession<'me,'arena> {
     pub terminal: Terminal<CrosstermBackend<io::Stdout>>,
     _cleanup: TerminalCleanup,  // Ensures cleanup lasts as long as TerminalSession
     pub state: &'me mut GlobalState<'arena>,
+    last_frame:Instant,
+
+}
+
+pub fn wait_frame_start(last_frame: &mut Instant) -> Result<(), Box<dyn std::error::Error>>{
+    let mut now = Instant::now();
+
+    // eprintln!("start waiting frame");
+
+    //busy loop since asking for time causes an OS switch anyway
+    //BUT we wana flush events ASAP
+    while now-*last_frame < FRAME_MIN_TIME {
+
+        //puting a proper poll breaks some functionality for stupid reason
+        //this is likely a bug in the terminal libarary
+        while event::poll(Duration::ZERO)? {
+            let _ = event::read();
+        }
+        now = Instant::now();
+    }
+
+    *last_frame = now;
+    // eprintln!("done waiting frame");
+    Ok(())
 }
 
 impl<'me,'arena> TerminalSession<'me,'arena> {
@@ -669,11 +691,13 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
     pub fn new(state:&'me mut GlobalState<'arena>) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = create_terminal()?;
         let cleanup = TerminalCleanup;
+        let last_frame = Instant::now() - Duration::from_secs(100);//literally just there as filler
         // let state = GlobalState::start()?;
         Ok(Self {
             terminal,
             _cleanup: cleanup,
             state,
+            last_frame,
         })
     }
 
@@ -682,11 +706,9 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
         &mut self,
         code_files: &mut CodeRegistry<'_,'arena>,
         obj_file: Arc<Path>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let loop_duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
-        
+    ) -> Result<(), Box<dyn std::error::Error>> {        
         loop {
-            let frame_start_time = std::time::Instant::now();
+            wait_frame_start(&mut self.last_frame)?;
 
 
             render_directory(&mut self.terminal, self.state)?;
@@ -700,7 +722,7 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
                 DirResult::File(mut file_state) => {
                     let path: Arc<Path> = fs::canonicalize(Path::new(&file_state.file_path))?.into();
                     let code_file = code_files.get_source_file(path)?;
-                    let res = Self::walk_file_loop(terminal,&mut file_state, code_file, obj_file.clone())?;
+                    let res = Self::walk_file_loop(&mut self.last_frame,terminal,&mut file_state, code_file, obj_file.clone())?;
 
                     match res {
                         FileResult::Exit => {return Ok(())},
@@ -709,22 +731,20 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
                     }
                 }
             }
-            flush_pending_events()?;
-            thread::sleep(loop_duration.saturating_sub(frame_start_time.elapsed()));
 
         }
     }
     // File loop to display and navigate files
     pub fn walk_file_loop(
+        last_frame: &mut Instant,
         terminal : &mut Terminal<CrosstermBackend<io::Stdout>>,
         file_state: &mut FileState<'_,'arena>,
         code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
-        let loop_duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
 
         loop {
-            let frame_start_time = std::time::Instant::now();
+             wait_frame_start(last_frame)?;
 
             render_file_asm_viewer(terminal, file_state)?;
             let res = handle_file_input(file_state, code_file, obj_file.clone())?;
@@ -732,9 +752,6 @@ impl<'me,'arena> TerminalSession<'me,'arena> {
                 FileResult::KeepGoing => {},
                 _ => {return Ok(res)}
             }
-            // Render at `ACTIONS_PER_SECOND` frames per second
-            flush_pending_events()?;
-            thread::sleep(loop_duration.saturating_sub(frame_start_time.elapsed()));
         }
     }
 }
