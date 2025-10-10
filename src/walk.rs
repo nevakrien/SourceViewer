@@ -635,6 +635,8 @@ fn make_assembly_inner<'a>(state: &GlobalState,max_visible_lines:usize) -> List<
             )
     
         }
+
+        //fallback
         prev = ins.serial_number as isize;
         let formatted_instruction = format!(
             "{:<4} {:#010x}: {:<6} {:<30}",

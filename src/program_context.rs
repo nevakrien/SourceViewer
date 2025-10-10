@@ -282,15 +282,15 @@ impl<'data,'r> CodeRegistry<'data,'r> {
 }
 
 
-pub struct DebugInstruction<'a>{
+pub struct DebugInstruction<'b,'a>{
     ins: InstructionDetail,
-    addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
+    addr2line: &'b addr2line::Context<EndianSlice<'a, RunTimeEndian>>,
     //needs a way to load the Sup files which are machine files... 
     //probably means we need the asm registry
 }
 
-impl<'a> DebugInstruction<'a> {
-    pub fn new(ins: InstructionDetail,addr2line: &'a addr2line::Context<EndianSlice<'a, RunTimeEndian>>) -> Self {
+impl<'a,'c> DebugInstruction<'c,'a> {
+    pub fn new(ins: InstructionDetail,addr2line: &'c addr2line::Context<EndianSlice<'a, RunTimeEndian>>) -> Self {
         DebugInstruction{ins,addr2line}
     }
 

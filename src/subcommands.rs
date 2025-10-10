@@ -63,8 +63,7 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let machine_file = registry.get_machine(file_path.into())?;
-        let ctx = addr2line::Context::from_arc_dwarf(machine_file.load_dwarf()?)?;
-
+        let ctx = machine_file.get_addr2line()?;
         let source_map = map_instructions_to_source(machine_file)?;
 
         for section in &machine_file.sections.clone() {
@@ -157,9 +156,7 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
         let machine_file = MachineFile::parse(&buffer)?;
-        let debug = machine_file.load_dwarf().ok().and_then(|dwarf_data| {
-            addr2line::Context::from_arc_dwarf(dwarf_data).ok()
-        });
+        let debug = machine_file.get_addr2line().ok();
 
         
         for section in &machine_file.sections {

@@ -12,6 +12,7 @@ use capstone::arch::{arm, arm64, x86};
 use capstone::prelude::*;
 use gimli::{read::Dwarf, SectionId, EndianSlice};
 use std::error::Error;
+use addr2line::Context;
 
 // pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
 // pub type FileMap = HashMap<Arc<Path>,LineMap>;
@@ -29,7 +30,7 @@ impl LineMap {
     }
 
     #[inline(always)]
-    pub fn iter_maped(&self) -> btree_map::Iter<u32,Vec<InstructionDetail>>{
+    pub fn iter_maped(&'_ self) -> btree_map::Iter<'_, u32,Vec<InstructionDetail>>{
         self.inner.iter()
     }
 }
@@ -51,6 +52,8 @@ impl FileMap {
     // }
 }
 
+type Endian<'a> = EndianSlice<'a,RunTimeEndian>;
+
 #[derive(Debug)]
 pub struct  MachineFileInner<'a> {
     pub obj: object::File<'a>,
@@ -61,7 +64,8 @@ pub struct  MachineFileInner<'a> {
 pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
     pub sections: Vec<Section<'a>>,
-    dwarf : Cell<Option<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>>>,
+    dwarf : Cell<Option<Arc<Dwarf<Endian<'a>>>>>,
+    addr2line : Cell<Option<Arc<Context<Endian<'a>>>>>,
     file_lines: Cell<Option<Arc<FileMap>>>, //line -> instruction>,
 }
 
@@ -112,8 +116,7 @@ impl<'a> MachineFile<'a> {
             return Ok(ans)
         }
 
-        let dwarf = self.load_dwarf()?;
-        let context = addr2line::Context::from_arc_dwarf(dwarf)?;
+        let context = self.get_addr2line()?;
 
         // let mut ans = Arc::new(HashMap::new());
         let mut ans = Arc::new(FileMap::default());
@@ -162,11 +165,11 @@ impl<'a> MachineFile<'a> {
         Ok(ans)
     }
 
-    pub fn get_gimli_section(&self, section: SectionId) -> &'a [u8] {
+    fn get_gimli_section(&self, section: SectionId) -> &'a [u8] {
         self.obj.section_by_name(section.name()).and_then(|x| x.data().ok()).unwrap_or(&[])
     }
 
-    pub fn load_dwarf(&self) -> Result<Arc<Dwarf<EndianSlice<'a,RunTimeEndian>>>, gimli::Error>{
+    pub fn load_dwarf(&self) -> Result<Arc<Dwarf<Endian<'a>>>, gimli::Error>{
         if let Some(dwarf) = self.dwarf.replace(None) {
             self.dwarf.set(Some(dwarf.clone()));
             return Ok(dwarf)
@@ -181,6 +184,15 @@ impl<'a> MachineFile<'a> {
 
        self.dwarf.set(Some(dwarf.clone()));
        Ok(dwarf)
+    }
+
+    pub fn get_addr2line(&self) -> Result<Arc<Context<Endian<'a>>>,Box<dyn Error>>{
+        if let Some(addr) = self.addr2line.replace(None) {
+            self.addr2line.set(Some(addr.clone()));
+            return Ok(addr)
+        }
+        self.addr2line.set(Some(Context::from_arc_dwarf(self.load_dwarf()?)?.into()));
+        self.get_addr2line()
     }
 
     pub fn parse(buffer: &'a[u8]) -> Result<MachineFile<'a>, Box<dyn Error>>{
@@ -229,7 +241,8 @@ impl<'a> MachineFile<'a> {
             obj,
             sections: parsed_sections,
             dwarf:None.into(),
-            file_lines: None.into()
+            addr2line:None.into(),
+            file_lines: None.into(),
         })
     }
 
