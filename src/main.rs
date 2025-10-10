@@ -1,10 +1,8 @@
-use colored::Colorize;
 use clap::{Arg, Command};
-use std::path::PathBuf;
-use std::error::Error;
+use colored::Colorize;
 use source_viewer::subcommands::*;
-
-
+use std::error::Error;
+use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut command = Command::new("Source Viewer")
@@ -12,7 +10,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .version(env!("CARGO_PKG_VERSION"))
         .author("Neva Krien")
         .about("A tool for viewing assembly and source information in binary files")
-        
         .subcommand(
             Command::new("walk")
                 .about("looks at the source code files next to assembly")
@@ -24,7 +21,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
         )
-
         .subcommand(
             Command::new("sections")
                 .about("Dumps sections information for each file")
@@ -36,7 +32,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
         )
-
         .subcommand(
             Command::new("lines")
                 .about("Annotates assembly instructions with source information")
@@ -48,9 +43,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
         )
-
-        
-
         .subcommand(
             Command::new("view_source")
                 .about("looks at the source code files that made the binary")
@@ -74,7 +66,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .long("walk")
                         .help("start the walk command on the selected file")
                         .action(clap::ArgAction::SetTrue), // Sets the flag as a binary on/off
-                        
                 )
                 .arg(
                     Arg::new("SELECTIONS")
@@ -85,19 +76,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                             if let Ok(index) = s.parse::<usize>() {
                                 Ok(FileSelection::Index(index))
                             } else {
-                                let path = std::fs::canonicalize(PathBuf::from(s))
-                                .map_err(|e| format!("Error canonicalizing path {}: {}", s, e))?;
+                                let path =
+                                    std::fs::canonicalize(PathBuf::from(s)).map_err(|e| {
+                                        format!("Error canonicalizing path {}: {}", s, e)
+                                    })?;
                                 if path.exists() {
                                     Ok(FileSelection::Path(path))
                                 } else {
                                     Err(format!("'{}' is not a valid index or existing path", s))
                                 }
                             }
-                        }))
+                        })),
                 ),
-
-            )
-
+        )
         .subcommand(
             Command::new("view_sources")
                 .about("dumps all source files made to make bins")
@@ -109,28 +100,20 @@ fn main() -> Result<(), Box<dyn Error>> {
                         .value_parser(clap::value_parser!(PathBuf)),
                 ),
         )
-
-
-
-        .subcommand(
-            {
+        .subcommand({
             let description = format!(
                 "{}: {}",
                 "Not Finished".red(),
                 "dumps the dwarf debug information in the files"
             );
-            Command::new("dwarf_dump")
-                .about(description)
-                .arg(
-                    Arg::new("BINS")
-                        .help("Input binary/object files to process")
-                        .required(true)
-                        .num_args(1..) // Allows multiple file paths
-                        .value_parser(clap::value_parser!(PathBuf)),
-                )
-            },
-        );
-        
+            Command::new("dwarf_dump").about(description).arg(
+                Arg::new("BINS")
+                    .help("Input binary/object files to process")
+                    .required(true)
+                    .num_args(1..) // Allows multiple file paths
+                    .value_parser(clap::value_parser!(PathBuf)),
+            )
+        });
 
     let matches = command.clone().get_matches();
 
@@ -147,4 +130,3 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 }
-

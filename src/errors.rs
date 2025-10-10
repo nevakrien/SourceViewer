@@ -1,35 +1,33 @@
 use std::error::Error;
-use std::rc::Rc;
 use std::fmt;
+use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 pub struct StackedError {
     source: Rc<dyn Error>, // Reference to another error
-    message: &'static str
+    message: &'static str,
 }
 
 impl StackedError {
     // Constructor to create a new WrapedError
-    pub fn new(source: Box<dyn Error>,message:&'static str) -> Self
-    {
+    pub fn new(source: Box<dyn Error>, message: &'static str) -> Self {
         StackedError {
             source: source.into(),
-            message
+            message,
         }
     }
 
-    pub fn from_wraped(wraped:WrapedError,message:&'static str) -> Self{
+    pub fn from_wraped(wraped: WrapedError, message: &'static str) -> Self {
         StackedError {
             source: wraped.source,
-            message
+            message,
         }
     }
 }
 
-
 impl fmt::Display for StackedError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}",self.source,self.message)
+        write!(f, "{} {}", self.source, self.message)
     }
 }
 impl Error for StackedError {
@@ -45,8 +43,7 @@ pub struct WrapedError {
 
 impl WrapedError {
     // Constructor to create a new WrapedError
-    pub fn new(source: Box<dyn Error>) -> Self
-    {
+    pub fn new(source: Box<dyn Error>) -> Self {
         WrapedError {
             source: source.into(),
         }
@@ -64,5 +61,3 @@ impl Error for WrapedError {
         Some(&*self.source) // Return the inner error as the source
     }
 }
-
-
