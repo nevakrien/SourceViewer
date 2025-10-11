@@ -23,3 +23,8 @@ gimli = { version = "0.32.3", features = ["read"] }
 object = "0.37.3"
 tui = "0.19.0"
 typed-arena = "2.0.2"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
