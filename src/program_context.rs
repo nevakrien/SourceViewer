@@ -1,3 +1,5 @@
+use std::cell::RefMut;
+use std::cell::RefCell;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
 use crate::file_parser::InstructionDetail;
@@ -197,7 +199,7 @@ impl CodeFile {
 
 pub struct CodeRegistry<'data, 'r> {
     pub source_files: HashMap<Arc<Path>, Result<&'r CodeFile, Box<WrapedError>>>,
-    asm: &'r mut AsmRegistry<'data>,
+    asm: &'r RefCell<AsmRegistry<'data>>,
     arena: &'r Arena<CodeFile>,
     // pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
@@ -210,7 +212,7 @@ pub fn make_context<'data>(
 }
 
 impl<'data, 'r> CodeRegistry<'data, 'r> {
-    pub fn new(asm: &'r mut AsmRegistry<'data>, arena: &'r Arena<CodeFile>) -> Self {
+    pub fn new(asm: &'r RefCell<AsmRegistry<'data>>, arena: &'r Arena<CodeFile>) -> Self {
         CodeRegistry {
             asm,
             arena,
@@ -219,7 +221,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
     }
 
     pub fn format_inst_debug(&mut self,ins:&InstructionDetail,debug:&DebugContext<'data>)->String{
-        format_inst_debug(ins,debug,self.asm)
+        format_inst_debug(ins,debug,&mut self.asm.borrow_mut())
     }
 
     pub fn get_existing_source_file(
@@ -251,7 +253,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
                     }
                 };
 
-                for (obj_path, res) in self.asm.map.iter_mut() {
+                for (obj_path, res) in self.asm.borrow_mut().map.iter_mut() {
                     let machine_file = match res {
                         Ok(x) => x,
                         Err(e) => {
@@ -291,12 +293,26 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
         }
     }
 
-    pub fn visit_machine_file(
-        &mut self,
-        path: Arc<Path>,
-    ) -> Result<&mut MachineFile<'data>, Box<dyn Error>> {
-        self.asm.get_machine(path)
-    }
+pub fn visit_machine_file<'a>(
+    &'a self,
+    path: Arc<Path>,
+) -> Result<RefMut<'a, MachineFile<'data>>, Box<dyn Error>> {
+    let asm_borrow = self.asm.borrow_mut();
+
+    let mut error = None;
+
+    RefMut::filter_map(asm_borrow, |asm| {
+        match asm.get_machine(path.clone()) {
+            Ok(m) => Some(m),
+            Err(e) => {
+                error = Some(e);
+                None
+            },
+        }
+    })
+    .map_err(|_| error.unwrap())
+}
+
 }
 
 pub fn format_inst_debug<'a, 'b: 'a, 'c>(
@@ -312,50 +328,3 @@ pub fn format_inst_debug<'a, 'b: 'a, 'c>(
         find_func_name(addr2line, registry, ins.address).unwrap_or("<unknown>".to_string()),
     )
 }
-
-// pub struct DebugInstruction<'b, 'a> {
-//     ins: InstructionDetail,
-//     addr2line: &'b DebugContext<'a>,
-//     //needs a way to load the Sup files which are machine files...
-//     //probably means we need the asm registry
-// }
-
-// impl<'a, 'c> DebugInstruction<'c, 'a> {
-//     pub fn new(
-//         ins: InstructionDetail,
-//         addr2line: &'c DebugContext<'a>,
-//     ) -> Self {
-//         DebugInstruction { ins, addr2line }
-//     }
-
-//     // pub fn get_func_name(&self ) ->Option<String> {
-//     //     self.resolve_function_name(self.ins.address)
-//     // }
-
-//     pub fn get_string_load<'b: 'a>(&self, registry: &mut AsmRegistry<'b>) -> String {
-//         format!(
-//             "{:#010x}: {:<6} {:<30} {}",
-//             self.ins.address,
-//             self.ins.mnemonic,
-//             self.ins.op_str, //this needs a fixup
-//             find_func_name(self.addr2line, registry, self.ins.address)
-//                 .unwrap_or("<unknown>".to_string()),
-//         )
-//     }
-
-//     // pub fn get_string_no_load(&self) -> String {
-//     //     format!("{:#010x}: {:<6} {:<30} {}",
-
-//     //         self.ins.address,
-//     //         self.ins.mnemonic,
-//     //         self.ins.op_str, //this needs a fixup
-//     //         self.get_func_name().unwrap_or("<unknown>".to_string()),
-//     //     )
-//     // }
-
-//     // Resolve the function name for a given address using addr2line
-
-//     // fn resolve_function_name(&self, address: u64) -> Option<String> {
-//     //     resolve_func_name(self.addr2line,address)
-//     // }
-// }

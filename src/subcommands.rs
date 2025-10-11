@@ -1,3 +1,5 @@
+use std::rc::Rc;
+use std::cell::RefCell;
 use crate::program_context::CodeRegistry;
 use crate::walk::FileResult;
 use crate::walk::GlobalState;
@@ -30,8 +32,8 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
 
     let asm_arena = Arena::new();
     let code_arena = Arena::new();
-    let mut registry = AsmRegistry::new(&asm_arena);
-    let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
+    let registry = AsmRegistry::new(&asm_arena).into();
+    let code_files = CodeRegistry::new(&registry, &code_arena);
 
     println!("visiting file {:?}", &*obj_file);
     code_files
@@ -40,10 +42,10 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
 
     // let mut terminal = create_terminal()?;
     // let _cleanup = TerminalCleanup;
-    let mut state = GlobalState::start()?;
+    let mut state = GlobalState::start(Rc::new(code_files.into()))?;
     let mut session = TerminalSession::new(&mut state)?;
 
-    session.walk_directory_loop(&mut code_files, obj_file)
+    session.walk_directory_loop(obj_file)
 }
 
 pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
@@ -294,8 +296,8 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         let obj_file: Arc<Path> = file_path.as_path().into();
         let asm_arena = Arena::new();
         let code_arena = Arena::new();
-        let mut registry = AsmRegistry::new(&asm_arena);
-        let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
+        let registry = AsmRegistry::new(&asm_arena).into();
+        let mut code_files = CodeRegistry::new(&registry, &code_arena);
         code_files
             .visit_machine_file(obj_file.clone())?
             .get_lines_map()?;
@@ -328,13 +330,15 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
             .ok_or("No parent dir to path")?
             .to_path_buf();
 
-        let mut state = GlobalState::start_from(parent)?;
+        let code_files_rc = Rc::new(RefCell::new(code_files));
+        let mut state = GlobalState::start_from(parent,code_files_rc.clone())?;
         let mut session = TerminalSession::new(&mut state)?;
 
         //file
         {
             let mut file_state = crate::walk::load_file(session.state, file_path)?;
-            let code_file = code_files.get_source_file(file_path.into())?;
+            
+            let code_file = code_files_rc.borrow_mut().get_source_file(file_path.into())?;
             let mut last_frame = Instant::now();
             let res = TerminalSession::walk_file_loop(
                 &mut last_frame,
@@ -351,7 +355,7 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
             }
         }
 
-        return session.walk_directory_loop(&mut code_files, obj_file);
+        return session.walk_directory_loop(obj_file);
     }
 
     // Display source files with their indices

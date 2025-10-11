@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use crate::file_parser::InstructionDetail;
 use crate::program_context::CodeFile;
 use crate::program_context::CodeRegistry;
@@ -14,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use std::{fs, fs::File, thread};
+use std::{fs, fs::File};
 use tui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -37,7 +39,7 @@ impl Drop for TerminalCleanup {
     }
 }
 
-pub struct GlobalState<'arena> {
+pub struct GlobalState<'b,'arena> {
     current_dir: PathBuf,
     original_dir: PathBuf,
     pub dir_list_state: ListState,
@@ -45,6 +47,7 @@ pub struct GlobalState<'arena> {
     
     show_lines: bool,
 
+    code_files: Rc<RefCell<CodeRegistry<'b, 'arena>>>,
     selected_asm: BTreeMap<u64, &'arena InstructionDetail>, //address -> instructions
     // asm_cursor: usize,
     cur_asm: u64,
@@ -52,13 +55,14 @@ pub struct GlobalState<'arena> {
     help_toggle: bool,
 }
 
-impl<'arena> GlobalState<'arena> {
-    pub fn start() -> Result<Self, Box<dyn std::error::Error>> {
-        GlobalState::start_from(PathBuf::from("."))
+impl<'b, 'arena> GlobalState<'b, 'arena> {
+    pub fn start(code_files: Rc<RefCell<CodeRegistry<'b, 'arena>>>) -> Result<Self, Box<dyn std::error::Error>> {
+        GlobalState::start_from(PathBuf::from("."),code_files)
     }
-    pub fn start_from(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn start_from(path: PathBuf,code_files: Rc<RefCell<CodeRegistry<'b, 'arena>>>) -> Result<Self, Box<dyn std::error::Error>> {
         let dir_entries = fs::read_dir(&*path)?.filter_map(Result::ok).collect();
         let mut state = Self {
+            code_files,
             current_dir: path.clone(),
             original_dir: path,
             dir_list_state: ListState::default(),
@@ -161,7 +165,7 @@ impl<'arena> GlobalState<'arena> {
     // }
 }
 
-pub struct FileState<'me, 'arena> {
+pub struct FileState<'me, 'b, 'arena> {
     // pub current_dir: PathBuf,
     // pub original_dir: PathBuf,
     // pub dir_list_state: ListState,
@@ -172,7 +176,7 @@ pub struct FileState<'me, 'arena> {
     cursor: usize,
     pub file_path: String,
 
-    global: &'me mut GlobalState<'arena>,
+    global: &'me mut GlobalState<'b, 'arena>,
     // selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
 }
 
@@ -272,15 +276,15 @@ pub fn render_directory(
     Ok(())
 }
 
-pub enum DirResult<'me, 'arena> {
+pub enum DirResult<'me, 'b, 'arena> {
     KeepGoing,
-    File(FileState<'me, 'arena>),
+    File(FileState<'me, 'b, 'arena>),
     Exit,
 }
 
-pub fn handle_directory_input<'me, 'arena>(
-    state: &'me mut GlobalState<'arena>,
-) -> Result<DirResult<'me, 'arena>, Box<dyn std::error::Error>> {
+pub fn handle_directory_input<'me, 'b, 'arena>(
+    state: &'me mut GlobalState<'b, 'arena>,
+) -> Result<DirResult<'me, 'b, 'arena>, Box<dyn std::error::Error>> {
     match event::read()? {
         Event::Key(KeyEvent { code, kind, .. }) => {
             if crossterm::event::KeyEventKind::Release == kind {
@@ -375,10 +379,10 @@ pub fn handle_directory_input<'me, 'arena>(
     Ok(DirResult::KeepGoing)
 }
 
-pub fn load_file<'b, 'arena>(
-    global: &'b mut GlobalState<'arena>,
+pub fn load_file<'c, 'b, 'arena>(
+    global: &'c mut GlobalState<'b, 'arena>,
     path: &Path,
-) -> Result<FileState<'b, 'arena>, Box<dyn std::error::Error>> {
+) -> Result<FileState<'c, 'b, 'arena>, Box<dyn std::error::Error>> {
     Ok(FileState {
         file_content: read_file_lines(path)?,
         file_path: path.display().to_string(),
@@ -397,8 +401,8 @@ pub enum FileResult {
 }
 
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
-pub fn handle_file_input<'arena>(
-    state: &mut FileState<'_, 'arena>,
+pub fn handle_file_input<'b, 'arena>(
+    state: &mut FileState<'_, 'b, 'arena>,
     code_file: &'arena CodeFile,
     obj_path: Arc<Path>,
 ) -> Result<FileResult, io::Error> {
@@ -660,10 +664,10 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
     // .add_modifier(Modifier::BOLD))
 }
 
-pub struct TerminalSession<'me, 'arena> {
+pub struct TerminalSession<'me, 'b, 'arena> {
     pub terminal: Terminal<CrosstermBackend<io::Stdout>>,
     _cleanup: TerminalCleanup, // Ensures cleanup lasts as long as TerminalSession
-    pub state: &'me mut GlobalState<'arena>,
+    pub state: &'me mut GlobalState<'b, 'arena>,
     last_frame: Instant,
 }
 
@@ -688,9 +692,9 @@ pub fn wait_frame_start(last_frame: &mut Instant) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
-impl<'me, 'arena> TerminalSession<'me, 'arena> {
+impl<'me, 'b, 'arena> TerminalSession<'me, 'b, 'arena> {
     // Initialize Terminal, GlobalState, and TerminalCleanup
-    pub fn new(state: &'me mut GlobalState<'arena>) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(state: &'me mut GlobalState<'b, 'arena>) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = create_terminal()?;
         let cleanup = TerminalCleanup;
         let last_frame = Instant::now() - Duration::from_secs(100); //literally just there as filler
@@ -706,9 +710,12 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
     // Directory loop to select files
     pub fn walk_directory_loop(
         &mut self,
-        code_files: &mut CodeRegistry<'_, 'arena>,
+        // code_files: &mut CodeRegistry<'_, 'arena>,
         obj_file: Arc<Path>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        
+        let binding = self.state.code_files.clone();
+        let mut code_files = binding.borrow_mut();
         loop {
             wait_frame_start(&mut self.last_frame)?;
 
@@ -745,7 +752,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
     pub fn walk_file_loop(
         last_frame: &mut Instant,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-        file_state: &mut FileState<'_, 'arena>,
+        file_state: &mut FileState<'_, 'b, 'arena>,
         code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
