@@ -1,3 +1,6 @@
+use std::process::exit;
+use std::error::Error;
+use crate::program_context::DebugContext;
 use std::cell::RefCell;
 use std::rc::Rc;
 use crate::file_parser::InstructionDetail;
@@ -48,7 +51,7 @@ pub struct GlobalState<'b,'arena> {
     show_lines: bool,
 
     code_files: Rc<RefCell<CodeRegistry<'b, 'arena>>>,
-    selected_asm: BTreeMap<u64, &'arena InstructionDetail>, //address -> instructions
+    selected_asm: BTreeMap<u64, (&'arena InstructionDetail,Option<Rc<str>>)>, //address -> instructions
     // asm_cursor: usize,
     cur_asm: u64,
 
@@ -86,20 +89,15 @@ impl<'b, 'arena> GlobalState<'b, 'arena> {
         state.dir_list_state.select(Some(0)); // Initialize the selected index
         Ok(state)
     }
-
-    fn add_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>) {
-        match debug {
-            None => {}
-            Some(data) => {
-                // let current_addres = self
-                self.selected_asm
-                    .extend(data.iter().map(|x| (x.address, x)));
-            }
-        }
+    fn add_asm_line(&mut self, data: &'arena [InstructionDetail],names:&[Option<Rc<str>>]) {
+        self.selected_asm
+            .extend(data.iter()
+                .enumerate()
+                .map(|(i,x)| (x.address, (x,names[i].clone()))));
     }
 
-    fn remove_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>) {
-        for address in debug.unwrap_or_default().iter().map(|x| x.address) {
+    fn remove_asm_line(&mut self, debug: &'arena [InstructionDetail]) {
+        for address in debug.iter().map(|x| x.address) {
             self.selected_asm.remove(&address);
         }
         self.cur_asm = min(
@@ -111,13 +109,38 @@ impl<'b, 'arena> GlobalState<'b, 'arena> {
         );
     }
 
+    // fn add_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>) {
+    //     match debug {
+    //         None => {}
+    //         Some(data) => {
+    //             // let current_addres = self
+    //             self.selected_asm
+    //                 .extend(data.iter().map(|x| (x.address, x)));
+    //         }
+    //     }
+    // }
+
+    // fn remove_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>) {
+    //     for address in debug.unwrap_or_default().iter().map(|x| x.address) {
+    //         self.selected_asm.remove(&address);
+    //     }
+    //     self.cur_asm = min(
+    //         self.cur_asm,
+    //         self.selected_asm
+    //             .last_key_value()
+    //             .map(|(k, _)| *k)
+    //             .unwrap_or_default(),
+    //     );
+    // }
+
     #[inline(always)]
     fn cur_asm_range(
         &self,
-    ) -> std::collections::btree_map::Range<'_, u64, &'arena InstructionDetail> {
+    ) -> std::collections::btree_map::Range<'_, u64, (&'arena InstructionDetail,Option<Rc<str>>)> {
         // Start from asm_cursor and get all subsequent entries
         self.selected_asm.range(self.cur_asm..)
     }
+
 
     #[inline]
     fn asm_up(&mut self) {
@@ -174,7 +197,7 @@ pub struct FileState<'me, 'b, 'arena> {
 
     file_scroll: usize,
     cursor: usize,
-    pub file_path: String,
+    pub file_path: Arc<Path>,
 
     global: &'me mut GlobalState<'b, 'arena>,
     // selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
@@ -185,6 +208,7 @@ struct Line<'data> {
     is_selected: bool,
     line_number: usize, // Optionally store the line number
     debug_info: Option<Option<&'data [InstructionDetail]>>, // debug_info: Option<String>,  // Placeholder for future debug information
+    func_names:Vec<Option<Rc<str>>>
 }
 
 impl<'data> Line<'data> {
@@ -194,6 +218,7 @@ impl<'data> Line<'data> {
             is_selected: false,
             line_number,
             debug_info: None,
+            func_names:Vec::new(),
         }
     }
 
@@ -201,13 +226,28 @@ impl<'data> Line<'data> {
     fn load_debug(
         &mut self,
         code_file: &'data CodeFile,
+        debug_contex: Option<&DebugContext<'data>>,
+        code_files:&CodeRegistry<'data,'_>,
         obj_path: Arc<Path>,
-    ) -> Option<&'data [InstructionDetail]> {
+    ) -> Option<(&'data [InstructionDetail],&[Option<Rc<str>>])> {
         match self.debug_info {
-            Some(x) => x,
+            Some(x) => Some((x?,self.func_names.as_slice())),
             None => {
                 self.debug_info = Some(code_file.get_asm(&(self.line_number as u32), obj_path));
-                self.debug_info.unwrap()
+
+                if let Some(ans) = self.debug_info.unwrap(){
+                    self.func_names.extend(
+                    ans.iter().map(|x| {
+                        code_files.find_func_name(x,debug_contex?)
+                        .map(|x| x.into())
+                    })
+                    );
+
+                    return Some((ans,self.func_names.as_slice()));
+                }
+                
+                
+                None
             }
         }
     }
@@ -332,7 +372,7 @@ pub fn handle_directory_input<'me, 'b, 'arena>(
                             load_dir(state)?;
                             state.dir_list_state.select(Some(0));
                         } else if path.is_file() {
-                            return Ok(DirResult::File(load_file(state, &path)?));
+                            return Ok(DirResult::File(load_file(state, path.into())?));
                         }
                     }
                 }
@@ -381,11 +421,11 @@ pub fn handle_directory_input<'me, 'b, 'arena>(
 
 pub fn load_file<'c, 'b, 'arena>(
     global: &'c mut GlobalState<'b, 'arena>,
-    path: &Path,
+    path: Arc<Path>,
 ) -> Result<FileState<'c, 'b, 'arena>, Box<dyn std::error::Error>> {
     Ok(FileState {
-        file_content: read_file_lines(path)?,
-        file_path: path.display().to_string(),
+        file_content: read_file_lines(&path)?,
+        file_path: path.clone(),
         file_scroll: 0,
         cursor: 0,
         // asm_cursor :0,
@@ -401,11 +441,20 @@ pub enum FileResult {
 }
 
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
-pub fn handle_file_input<'b, 'arena>(
+pub fn handle_file_input<'b, 'arena : 'b>(
     state: &mut FileState<'_, 'b, 'arena>,
-    code_file: &'arena CodeFile,
     obj_path: Arc<Path>,
-) -> Result<FileResult, io::Error> {
+) -> Result<FileResult, Box<dyn Error>> {
+
+
+    let binding = state.global.code_files.clone();
+    let mut code_files = binding.borrow_mut();
+    let addr2line = code_files.visit_machine_file(obj_path.clone())
+    .ok().map(|x| x.get_addr2line().ok()).flatten();
+
+    let code_file = code_files.get_source_file(state.file_path.clone())?;
+   
+
     match event::read()? {
         Event::Key(KeyEvent { code, kind, .. }) => {
             if crossterm::event::KeyEventKind::Release == kind {
@@ -454,10 +503,15 @@ pub fn handle_file_input<'b, 'arena>(
                     // Toggle selection of the current line under the cursor
                     if let Some(line) = state.file_content.get_mut(state.cursor) {
                         line.is_selected = !line.is_selected;
-                        let info = line.load_debug(code_file, obj_path);
 
-                        if line.is_selected {
-                            state.global.add_asm_line(info)
+                        let selected = line.is_selected;
+                        let opt = line.load_debug(code_file,addr2line.as_deref(),&state.global.code_files.borrow(), obj_path);
+                        
+                        let info = opt.map(|x| x.0).unwrap_or_default();
+                        let names = opt.map(|x| x.1).unwrap_or_default();
+
+                        if selected {
+                            state.global.add_asm_line(info,names)
                         } else {
                             state.global.remove_asm_line(info)
                         }
@@ -578,7 +632,7 @@ pub fn render_file_asm_viewer(
 
         // Source file block
         let file_block = Block::default().borders(Borders::ALL).title(Span::styled(
-            format!("File Viewer - {}", state.file_path),
+            format!("File Viewer - {}", state.file_path.display()),
             Style::default()
                 .fg(Color::Blue)
                 .add_modifier(Modifier::BOLD),
@@ -633,9 +687,9 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
     // let mut asm_items = Vec::new();
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
-    for ins in state
+    for (ins,func_name) in state
         .cur_asm_range()
-        .map(|(_, v)| *v)
+        .map(|(_, v)| v.clone())
         .take(max_visible_lines)
     {
         if ins.serial_number as isize != prev + 1 {
@@ -644,11 +698,11 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             )
         }
 
-        //fallback
+
         prev = ins.serial_number as isize;
         let formatted_instruction = format!(
-            "{:<4} {:#010x}: {:<6} {:<30}",
-            ins.serial_number, ins.address, ins.mnemonic, ins.op_str,
+            "{:<4} {:#010x}: {:<6} {:<30} {}",
+            ins.serial_number, ins.address, ins.mnemonic, ins.op_str,func_name.unwrap_or("".into())
         )
         .to_string();
 
@@ -692,7 +746,7 @@ pub fn wait_frame_start(last_frame: &mut Instant) -> Result<(), Box<dyn std::err
     Ok(())
 }
 
-impl<'me, 'b, 'arena> TerminalSession<'me, 'b, 'arena> {
+impl<'me, 'b, 'arena:'b> TerminalSession<'me, 'b, 'arena> {
     // Initialize Terminal, GlobalState, and TerminalCleanup
     pub fn new(state: &'me mut GlobalState<'b, 'arena>) -> Result<Self, Box<dyn std::error::Error>> {
         let terminal = create_terminal()?;
@@ -714,8 +768,6 @@ impl<'me, 'b, 'arena> TerminalSession<'me, 'b, 'arena> {
         obj_file: Arc<Path>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         
-        let binding = self.state.code_files.clone();
-        let mut code_files = binding.borrow_mut();
         loop {
             wait_frame_start(&mut self.last_frame)?;
 
@@ -728,14 +780,10 @@ impl<'me, 'b, 'arena> TerminalSession<'me, 'b, 'arena> {
                 DirResult::KeepGoing => {}
                 DirResult::Exit => return Ok(()),
                 DirResult::File(mut file_state) => {
-                    let path: Arc<Path> =
-                        fs::canonicalize(Path::new(&file_state.file_path))?.into();
-                    let code_file = code_files.get_source_file(path)?;
                     let res = Self::walk_file_loop(
                         &mut self.last_frame,
                         terminal,
                         &mut file_state,
-                        code_file,
                         obj_file.clone(),
                     )?;
 
@@ -748,25 +796,36 @@ impl<'me, 'b, 'arena> TerminalSession<'me, 'b, 'arena> {
             }
         }
     }
-    // File loop to display and navigate files
     pub fn walk_file_loop(
         last_frame: &mut Instant,
-        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+        terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
         file_state: &mut FileState<'_, 'b, 'arena>,
-        code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
-        loop {
-            wait_frame_start(last_frame)?;
 
-            render_file_asm_viewer(terminal, file_state)?;
-            let res = handle_file_input(file_state, code_file, obj_file.clone())?;
+        //Canonicalize once at the start if needed
+        let obj_file = if obj_file.is_absolute() && obj_file.exists() {
+            obj_file
+        } else {
+            match fs::canonicalize(&*obj_file) {
+                Ok(p) => Arc::from(p),
+                Err(_e) => {
+                    obj_file // fallback to original
+                }
+            }
+        };
+
+        loop {
+            wait_frame_start(last_frame).unwrap_or_else(|_|{eprintln!("start"); exit(1)});
+            render_file_asm_viewer(terminal, file_state).unwrap_or_else(|_|{eprintln!("render"); exit(1)});
+            let res = handle_file_input(file_state, obj_file.clone()).unwrap_or_else(|_|{eprintln!("input"); exit(1)});
             match res {
                 FileResult::KeepGoing => {}
                 _ => return Ok(res),
             }
         }
     }
+
 }
 
 use tui::widgets::Clear;

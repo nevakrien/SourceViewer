@@ -23,3 +23,7 @@ gimli = { version = "0.32.3", features = ["read"] }
 object = "0.37.3"
 tui = "0.19.0"
 typed-arena = "2.0.2"
+
+[profile.dev]
+panic = "unwind"
+

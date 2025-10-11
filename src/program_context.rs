@@ -220,8 +220,11 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
         }
     }
 
-    pub fn format_inst_debug(&mut self,ins:&InstructionDetail,debug:&DebugContext<'data>)->String{
-        format_inst_debug(ins,debug,&mut self.asm.borrow_mut())
+    // pub fn format_inst_debug(&self,ins:&InstructionDetail,debug:&DebugContext<'data>)->String{
+    //     format_inst_debug(ins,debug,&mut self.asm.borrow_mut())
+    // }
+    pub fn find_func_name(&self,ins:&InstructionDetail,debug:&DebugContext<'data>) -> Option<String>{
+        find_func_name(debug, &mut self.asm.borrow_mut(), ins.address)
     }
 
     pub fn get_existing_source_file(

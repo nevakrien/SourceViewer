@@ -297,7 +297,7 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         let asm_arena = Arena::new();
         let code_arena = Arena::new();
         let registry = AsmRegistry::new(&asm_arena).into();
-        let mut code_files = CodeRegistry::new(&registry, &code_arena);
+        let code_files = CodeRegistry::new(&registry, &code_arena);
         code_files
             .visit_machine_file(obj_file.clone())?
             .get_lines_map()?;
@@ -336,15 +336,13 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
 
         //file
         {
-            let mut file_state = crate::walk::load_file(session.state, file_path)?;
+            let mut file_state = crate::walk::load_file(session.state, file_path.into())?;
             
-            let code_file = code_files_rc.borrow_mut().get_source_file(file_path.into())?;
             let mut last_frame = Instant::now();
             let res = TerminalSession::walk_file_loop(
                 &mut last_frame,
                 &mut session.terminal,
                 &mut file_state,
-                code_file,
                 obj_file.clone(),
             )?;
 
