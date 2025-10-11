@@ -505,7 +505,7 @@ pub fn handle_file_input<'b, 'arena : 'b>(
                         line.is_selected = !line.is_selected;
 
                         let selected = line.is_selected;
-                        let opt = line.load_debug(code_file,addr2line.as_deref(),&state.global.code_files.borrow(), obj_path);
+                        let opt = line.load_debug(code_file,addr2line.as_deref(),&code_files, obj_path);
                         
                         let info = opt.map(|x| x.0).unwrap_or_default();
                         let names = opt.map(|x| x.1).unwrap_or_default();
