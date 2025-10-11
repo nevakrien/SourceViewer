@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use crate::file_parser::InstructionDetail;
 use crate::program_context::CodeFile;
 use crate::program_context::CodeRegistry;
@@ -14,7 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use std::{fs, fs::File, thread};
+use std::{fs, fs::File};
 use tui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -45,7 +46,7 @@ pub struct GlobalState<'arena> {
     
     show_lines: bool,
 
-    selected_asm: BTreeMap<u64, &'arena InstructionDetail>, //address -> instructions
+    selected_asm: BTreeMap<u64, (&'arena InstructionDetail,Rc<str>)>, //address -> (instructions,line text)
     // asm_cursor: usize,
     cur_asm: u64,
 
@@ -83,13 +84,13 @@ impl<'arena> GlobalState<'arena> {
         Ok(state)
     }
 
-    fn add_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>) {
+    fn add_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>,text:Rc<str>) {
         match debug {
             None => {}
             Some(data) => {
                 // let current_addres = self
                 self.selected_asm
-                    .extend(data.iter().map(|x| (x.address, x)));
+                    .extend(data.iter().map(|x| (x.address, (x,text.clone()))));
             }
         }
     }
@@ -110,7 +111,7 @@ impl<'arena> GlobalState<'arena> {
     #[inline(always)]
     fn cur_asm_range(
         &self,
-    ) -> std::collections::btree_map::Range<'_, u64, &'arena InstructionDetail> {
+    ) -> std::collections::btree_map::Range<'_, u64, (&'arena InstructionDetail,Rc<str>)> {
         // Start from asm_cursor and get all subsequent entries
         self.selected_asm.range(self.cur_asm..)
     }
@@ -177,14 +178,14 @@ pub struct FileState<'me, 'arena> {
 }
 
 struct Line<'data> {
-    content: String,
+    content: Rc<str>,
     is_selected: bool,
     line_number: usize, // Optionally store the line number
     debug_info: Option<Option<&'data [InstructionDetail]>>, // debug_info: Option<String>,  // Placeholder for future debug information
 }
 
 impl<'data> Line<'data> {
-    fn new(content: String, line_number: usize) -> Self {
+    fn new(content: Rc<str>, line_number: usize) -> Self {
         Self {
             content,
             is_selected: false,
@@ -453,7 +454,7 @@ pub fn handle_file_input<'arena>(
                         let info = line.load_debug(code_file, obj_path);
 
                         if line.is_selected {
-                            state.global.add_asm_line(info)
+                            state.global.add_asm_line(info,line.content.clone())
                         } else {
                             state.global.remove_asm_line(info)
                         }
@@ -515,7 +516,7 @@ fn read_file_lines(path: &Path) -> io::Result<Vec<Line<'static>>> {
         .lines()
         .map_while(Result::ok)
         .enumerate()
-        .map(|(i, s)| Line::new(sanitise(s), i + 1))
+        .map(|(i, s)| Line::new(sanitise(s).into(), i + 1))
         .collect())
 }
 
@@ -536,7 +537,7 @@ fn create_line<'a>(line: &Line, show_lines: bool) -> ListItem<'a> {
         Span::raw("")
     };
 
-    let line_text = match line.content.as_str() {
+    let line_text = match &*line.content {
         "" => "-".to_string(),
         a => a.to_string(),
     };
@@ -629,9 +630,9 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
     // let mut asm_items = Vec::new();
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
-    for ins in state
+    for (ins,text) in state
         .cur_asm_range()
-        .map(|(_, v)| *v)
+        .map(|(_, v)| v.clone())
         .take(max_visible_lines)
     {
         if ins.serial_number as isize != prev + 1 {
@@ -640,13 +641,17 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             )
         }
 
-        //fallback
+        //print
         prev = ins.serial_number as isize;
         let formatted_instruction = format!(
-            "{:<4} {:#010x}: {:<6} {:<30}",
-            ins.serial_number, ins.address, ins.mnemonic, ins.op_str,
-        )
-        .to_string();
+            "{:<4} {:#010x}: {:<6} {:<30} {:<30}",
+            ins.serial_number,
+            ins.address,
+            ins.mnemonic,
+            ins.op_str,
+            text.trim_start(),
+        );
+
 
         asm_items.push(
             ListItem::new(vec![Spans::from(formatted_instruction)])
