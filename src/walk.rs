@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use crate::file_parser::InstructionDetail;
 use crate::program_context::CodeFile;
 use crate::program_context::CodeRegistry;
@@ -12,6 +11,7 @@ use std::collections::BTreeMap;
 use std::io::{self, BufRead};
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -43,10 +43,10 @@ pub struct GlobalState<'arena> {
     original_dir: PathBuf,
     pub dir_list_state: ListState,
     dir_entries: Box<[std::fs::DirEntry]>,
-    
+
     show_lines: bool,
 
-    selected_asm: BTreeMap<u64, (&'arena InstructionDetail,Rc<str>)>, //address -> (instructions,line text)
+    selected_asm: BTreeMap<u64, (&'arena InstructionDetail, Rc<str>)>, //address -> (instructions,line text)
     // asm_cursor: usize,
     cur_asm: u64,
 
@@ -84,13 +84,13 @@ impl<'arena> GlobalState<'arena> {
         Ok(state)
     }
 
-    fn add_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>,text:Rc<str>) {
+    fn add_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>, text: Rc<str>) {
         match debug {
             None => {}
             Some(data) => {
                 // let current_addres = self
                 self.selected_asm
-                    .extend(data.iter().map(|x| (x.address, (x,text.clone()))));
+                    .extend(data.iter().map(|x| (x.address, (x, text.clone()))));
             }
         }
     }
@@ -111,7 +111,7 @@ impl<'arena> GlobalState<'arena> {
     #[inline(always)]
     fn cur_asm_range(
         &self,
-    ) -> std::collections::btree_map::Range<'_, u64, (&'arena InstructionDetail,Rc<str>)> {
+    ) -> std::collections::btree_map::Range<'_, u64, (&'arena InstructionDetail, Rc<str>)> {
         // Start from asm_cursor and get all subsequent entries
         self.selected_asm.range(self.cur_asm..)
     }
@@ -454,7 +454,7 @@ pub fn handle_file_input<'arena>(
                         let info = line.load_debug(code_file, obj_path);
 
                         if line.is_selected {
-                            state.global.add_asm_line(info,line.content.clone())
+                            state.global.add_asm_line(info, line.content.clone())
                         } else {
                             state.global.remove_asm_line(info)
                         }
@@ -630,7 +630,7 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
     // let mut asm_items = Vec::new();
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
-    for (ins,text) in state
+    for (ins, text) in state
         .cur_asm_range()
         .map(|(_, v)| v.clone())
         .take(max_visible_lines)
@@ -651,7 +651,6 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             ins.op_str,
             text.trim_start(),
         );
-
 
         asm_items.push(
             ListItem::new(vec![Spans::from(formatted_instruction)])

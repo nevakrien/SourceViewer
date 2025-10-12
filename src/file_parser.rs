@@ -1,4 +1,5 @@
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
+use object::Architecture;
 use object::{Object, ObjectSection, SectionFlags};
 use std::cell::Cell;
 use std::collections::btree_map;
@@ -13,7 +14,6 @@ use capstone::prelude::*;
 use gimli::RunTimeEndian;
 use gimli::{read::Dwarf, EndianSlice, SectionId};
 use std::error::Error;
-
 // pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
 // pub type FileMap = HashMap<Arc<Path>,LineMap>;
 
@@ -71,16 +71,61 @@ pub struct MachineFile<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Section<'a> {
-    Code(CodeSection),
+    Code(LazyCondeSection<'a>),
     Info(InfoSection<'a>),
 }
 
 impl Section<'_> {
     pub fn name(&self) -> &str {
         match self {
-            Section::Code(x) => &x.name,
+            Section::Code(x) => x.name(),
             Section::Info(x) => &x.name,
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LazyCondeSection<'a> {
+    Done(CodeSection),
+    Pending(InfoSection<'a>),
+}
+
+impl LazyCondeSection<'_> {
+    pub fn name(&self) -> &str {
+        match self {
+            LazyCondeSection::Done(x) => &x.name,
+            LazyCondeSection::Pending(x) => &x.name,
+        }
+    }
+
+    pub fn disasm(&mut self, arch: &Architecture) -> Result<(), Box<dyn Error>> {
+        let LazyCondeSection::Pending(code_section) = self else {
+            return Ok(());
+        };
+        // Disassemble executable sections
+        let cs = create_capstone(arch)?;
+        let disasm = cs.disasm_all(code_section.data, code_section.address)?;
+        let mut instructions = Vec::new();
+        for (serial_number, insn) in disasm.iter().enumerate() {
+            instructions.push(InstructionDetail {
+                serial_number,
+                address: insn.address(),
+                mnemonic: insn
+                    .mnemonic()
+                    .unwrap_or("unknown")
+                    .to_owned()
+                    .into_boxed_str(),
+                op_str: insn.op_str().unwrap_or("unknown").to_owned(),
+                size: insn.len(),
+            });
+        }
+
+        *self = LazyCondeSection::Done(CodeSection {
+            name: code_section.name.clone(),
+            instructions,
+        });
+
+        Ok(())
     }
 }
 
@@ -94,6 +139,7 @@ pub struct CodeSection {
 pub struct InfoSection<'a> {
     pub name: Box<str>,
     pub data: &'a [u8],
+    pub address: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -107,7 +153,7 @@ pub struct InstructionDetail {
 }
 
 impl<'a> MachineFile<'a> {
-    pub fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
+    pub fn get_lines_map(&mut self) -> Result<Arc<FileMap>, Box<dyn Error>> {
         if let Some(ans) = self.file_lines.replace(None) {
             self.file_lines.set(Some(ans.clone()));
             return Ok(ans);
@@ -119,46 +165,47 @@ impl<'a> MachineFile<'a> {
         let mut ans = Arc::new(FileMap::default());
         let handle = Arc::get_mut(&mut ans).unwrap();
 
-        for instruction in self
-            .sections
-            .iter()
-            .filter_map(|item| {
-                if let Section::Code(code_section) = item {
-                    Some(&code_section.instructions)
-                } else {
-                    None
-                }
-            })
-            .flat_map(|instructions| instructions.iter())
-        {
-            if let Ok(Some(loc)) = context.find_location(instruction.address) {
-                match (loc.file, loc.line) {
-                    (Some(file_name), Some(line)) => {
-                        let file = Path::new(file_name).into();
-
-                        handle
-                            .inner
-                            .entry(file)
-                            .or_default()
-                            .inner
-                            .entry(line)
-                            .or_default()
-                            .push(instruction.clone());
-                    }
-                    (Some(file_name), None) => {
-                        let file = Path::new(file_name).into();
-
-                        handle
-                            .inner
-                            .entry(file)
-                            .or_default()
-                            .extra
-                            .push(instruction.clone());
-                    }
-                    (None, _) => todo!(),
-                }
+        for code_section in self.sections.iter_mut().filter_map(|item| {
+            if let Section::Code(c) = item {
+                Some(c)
             } else {
-                handle.extra.push(instruction.clone())
+                None
+            }
+        }) {
+            code_section.disasm(&self.obj.architecture())?;
+            let LazyCondeSection::Done(code) = code_section else {
+                unreachable!()
+            };
+            for instruction in &code.instructions {
+                if let Ok(Some(loc)) = context.find_location(instruction.address) {
+                    match (loc.file, loc.line) {
+                        (Some(file_name), Some(line)) => {
+                            let file = Path::new(file_name).into();
+
+                            handle
+                                .inner
+                                .entry(file)
+                                .or_default()
+                                .inner
+                                .entry(line)
+                                .or_default()
+                                .push(instruction.clone());
+                        }
+                        (Some(file_name), None) => {
+                            let file = Path::new(file_name).into();
+
+                            handle
+                                .inner
+                                .entry(file)
+                                .or_default()
+                                .extra
+                                .push(instruction.clone());
+                        }
+                        (None, _) => todo!(),
+                    }
+                } else {
+                    handle.extra.push(instruction.clone())
+                }
             }
         }
 
@@ -206,7 +253,7 @@ impl<'a> MachineFile<'a> {
         self.get_addr2line()
     }
 
-    pub fn parse(buffer: &'a [u8]) -> Result<MachineFile<'a>, Box<dyn Error>> {
+    pub fn parse(buffer: &'a [u8],parse_asm:bool) -> Result<MachineFile<'a>, Box<dyn Error>> {
         let obj = object::File::parse(buffer)?;
         let arch = obj.architecture();
         let mut cs = create_capstone(&arch)?;
@@ -218,6 +265,18 @@ impl<'a> MachineFile<'a> {
             let section_data = section.data()?;
 
             if should_disassemble(&section) {
+                if !parse_asm 
+                {   
+                    parsed_sections.push(Section::Code(LazyCondeSection::Pending(
+                        InfoSection{
+                            name: section_name,
+                            data: section_data,
+                            address: section.address(),
+
+                        }
+                    )));
+                    continue;
+                }
                 // Disassemble executable sections
                 let disasm = cs.disasm_all(section_data, section.address())?;
                 let mut instructions = Vec::new();
@@ -235,15 +294,16 @@ impl<'a> MachineFile<'a> {
                     });
                 }
 
-                parsed_sections.push(Section::Code(CodeSection {
+                parsed_sections.push(Section::Code(LazyCondeSection::Done(CodeSection {
                     name: section_name,
                     instructions,
-                }));
+                })));
             } else {
                 // Collect non-executable sections
                 parsed_sections.push(Section::Info(InfoSection {
                     name: section_name,
                     data: section_data,
+                    address: section.address(),
                 }));
             }
         }

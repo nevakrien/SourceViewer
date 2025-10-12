@@ -1,3 +1,5 @@
+use crate::file_parser::LazyCondeSection;
+use object::Object;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
 use crate::file_parser::InstructionDetail;
@@ -52,7 +54,7 @@ impl<'a> AsmRegistry<'a> {
                 };
                 let b = self.files_arena.alloc(buffer);
                 entry
-                    .insert(MachineFile::parse(b).map_err(WrapedError::new))
+                    .insert(MachineFile::parse(b,false).map_err(WrapedError::new))
                     .as_mut()
                     .map_err(|e| e.clone().into())
             }
@@ -71,8 +73,11 @@ pub fn map_instructions_to_source(
     let ctx = Context::from_arc_dwarf(machine_file.load_dwarf()?)?;
 
     // Iterate through each code section and map addresses to source
-    for section in &machine_file.sections {
-        if let Section::Code(code_section) = section {
+    for section in &mut machine_file.sections {
+        if let Section::Code(lazy) = section {
+            lazy.disasm(&machine_file.obj.architecture())?;
+            let LazyCondeSection::Done(code_section) = lazy else {unreachable!()};
+            
             for instruction in &code_section.instructions {
                 if let Ok(Some(loc)) = ctx.find_location(instruction.address) {
                     let file = loc.file.unwrap_or("<unknown>").to_string();
@@ -193,20 +198,49 @@ impl CodeFile {
     pub fn get_asm(&self, line: &u32, path: Arc<Path>) -> Option<&[InstructionDetail]> {
         self.asm.get(line)?.get(&path).map(|x| x.as_slice()) //.unwrap_or(&[])
     }
+
+    pub fn populate(&mut self, asm: &mut AsmRegistry<'_>, path: Arc<Path>) {
+        for (obj_path, res) in asm.map.iter_mut() {
+            let machine_file = match res {
+                Ok(x) => x,
+                Err(e) => {
+                    let error = StackedError::from_wraped(e.clone(), "while getting machine");
+                    self.errors.push((error, None));
+                    continue;
+                }
+            };
+            let map = match machine_file.get_lines_map() {
+                Ok(x) => x,
+                Err(e) => {
+                    let error = StackedError::new(e, "while making context");
+                    self.errors.push((error, None));
+                    continue;
+                }
+            };
+
+            if let Some(line_map) = map.get(&path) {
+                for (line, v) in line_map.iter_maped() {
+                    let spot = self
+                        .asm
+                        .entry(*line)
+                        .or_insert(HashMap::new())
+                        .entry(obj_path.clone())
+                        .or_insert(vec![]);
+
+                    spot.reserve(v.len());
+                    spot.extend_from_slice(v)
+                }
+            }
+        }
+    }
 }
 
 pub struct CodeRegistry<'data, 'r> {
     pub source_files: HashMap<Arc<Path>, Result<&'r CodeFile, Box<WrapedError>>>,
-    asm: &'r mut AsmRegistry<'data>,
+    pub asm: &'r mut AsmRegistry<'data>,
     arena: &'r Arena<CodeFile>,
     // pub visited : HashSet<Arc<Path>>,
     // pub asm: AsmRegistry<'a>,
-}
-
-pub fn make_context<'data>(
-    machine_file: &MachineFile<'data>,
-) -> Result<Context<EndianSlice<'data, RunTimeEndian>>, Box<dyn Error>> {
-    Ok(Context::from_arc_dwarf(machine_file.load_dwarf()?)?)
 }
 
 impl<'data, 'r> CodeRegistry<'data, 'r> {
@@ -251,39 +285,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
                     }
                 };
 
-                for (obj_path, res) in self.asm.map.iter_mut() {
-                    let machine_file = match res {
-                        Ok(x) => x,
-                        Err(e) => {
-                            let error =
-                                StackedError::from_wraped(e.clone(), "while getting machine");
-                            code_file.errors.push((error, None));
-                            continue;
-                        }
-                    };
-                    let map = match machine_file.get_lines_map() {
-                        Ok(x) => x,
-                        Err(e) => {
-                            let error = StackedError::new(e, "while making context");
-                            code_file.errors.push((error, None));
-                            continue;
-                        }
-                    };
-
-                    if let Some(line_map) = map.get(&path) {
-                        for (line, v) in line_map.iter_maped() {
-                            let spot = code_file
-                                .asm
-                                .entry(*line)
-                                .or_insert(HashMap::new())
-                                .entry(obj_path.clone())
-                                .or_insert(vec![]);
-
-                            spot.reserve(v.len());
-                            spot.extend_from_slice(v)
-                        }
-                    }
-                }
+                code_file.populate(self.asm, path);
 
                 entry.insert(Ok(code_file));
                 Ok(code_file)

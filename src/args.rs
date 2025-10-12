@@ -1,7 +1,7 @@
-use clap::CommandFactory;
 use clap::builder::ValueParser;
+use clap::CommandFactory;
 use clap::{Parser, Subcommand, ValueEnum};
-use colored::{Colorize, control::SHOULD_COLORIZE};
+use colored::{control::SHOULD_COLORIZE, Colorize};
 use std::path::PathBuf;
 
 /// When colorized output should be shown
@@ -18,8 +18,8 @@ pub enum ColorMode {
 pub fn apply_color_mode(mode: ColorMode) {
     match mode {
         ColorMode::Always => SHOULD_COLORIZE.set_override(true),
-        ColorMode::Never  => SHOULD_COLORIZE.set_override(false),
-        ColorMode::Auto   => {} // let `colored` auto-detect
+        ColorMode::Never => SHOULD_COLORIZE.set_override(false),
+        ColorMode::Auto => {} // let `colored` auto-detect
     }
 }
 
@@ -38,8 +38,11 @@ pub struct SingleBinOpts {
     )]
     pub color: ColorMode,
 
-    #[arg(value_name = "BIN", required = true,
-          help = "Input binary/object file to process")]
+    #[arg(
+        value_name = "BIN",
+        required = true,
+        help = "Input binary/object file to process"
+    )]
     pub bin: PathBuf,
 }
 
@@ -115,20 +118,20 @@ pub struct ViewSource {
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
-
 }
 
 impl Cli {
     pub fn get_color(&self) -> ColorMode {
-       self.command.get_color()
+        self.command.get_color()
     }
 
     pub fn is_subcommand_name(name: &str) -> bool {
         let cmd = Self::command();
 
-        let x = cmd.get_subcommands().any(|sc| {
-            sc.get_name() == name || sc.get_all_aliases().any(|a| a == name)
-        }); x
+        let x = cmd
+            .get_subcommands()
+            .any(|sc| sc.get_name() == name || sc.get_all_aliases().any(|a| a == name));
+        x
     }
 }
 
@@ -183,14 +186,13 @@ pub enum Commands {
 }
 
 impl Commands {
-    pub fn get_color(&self)->ColorMode{
-        match self{
-            Commands::Walk { opts }
-            | Commands::ViewSource(ViewSource{ opts, .. }) => opts.color,
+    pub fn get_color(&self) -> ColorMode {
+        match self {
+            Commands::Walk { opts } | Commands::ViewSource(ViewSource { opts, .. }) => opts.color,
             Commands::Sections { opts }
             | Commands::Lines { opts }
             | Commands::ViewSources { opts }
-            | Commands::DwarfDump { opts } => opts.color
+            | Commands::DwarfDump { opts } => opts.color,
         }
     }
 }

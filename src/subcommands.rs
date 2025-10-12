@@ -1,3 +1,4 @@
+use crate::file_parser::LazyCondeSection;
 use crate::args::FileSelection;
 use crate::program_context::find_func_name;
 use crate::program_context::CodeRegistry;
@@ -23,7 +24,7 @@ use std::fs;
 use std::path::PathBuf;
 use typed_arena::Arena;
 
-pub fn walk_command( obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let asm_arena = Arena::new();
     let code_arena = Arena::new();
     let mut registry = AsmRegistry::new(&asm_arena);
@@ -53,20 +54,25 @@ pub fn lines_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
         let source_map = map_instructions_to_source(machine_file)?;
 
         for section in &machine_file.sections.clone() {
-            if let Section::Code(code_section) = section {
+            if let Section::Code(lazy) = section {
                 println!("{}", section.name());
+                
+                let LazyCondeSection::Done(code_section) = lazy else {unreachable!()};
+
                 for (_i, ins) in code_section.instructions.iter().enumerate() {
-                    let (file, line) = match source_map.get(&ins.address)  {
-                        Some((f,l))=>(f.to_string(),l.to_string()),
-                        None=>("<unknown>".to_string(),"<unknown>".to_string())
+                    let (file, line) = match source_map.get(&ins.address) {
+                        Some((f, l)) => (f.to_string(), l.to_string()),
+                        None => ("<unknown>".to_string(), "<unknown>".to_string()),
                     };
-                    let asm = format!("{:#010x}: {:<6} {:<15}",
+                    let asm = format!(
+                        "{:#010x}: {:<6} {:<15}",
                         ins.address,
                         ins.mnemonic,
                         ins.op_str, //this needs a fixup
                     );
 
-                    let func = find_func_name(&ctx, &mut registry, ins.address).unwrap_or("<unknown>".to_string());
+                    let func = find_func_name(&ctx, &mut registry, ins.address)
+                        .unwrap_or("<unknown>".to_string());
 
                     println!(
                         "{} {} {}:{}",
@@ -75,7 +81,6 @@ pub fn lines_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
                         file.to_string().yellow(),
                         line.to_string().blue()
                     );
-                    
                 }
             }
         }
@@ -116,14 +121,14 @@ fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) {
     }
 }
 
-pub fn dwarf_dump_command(file_paths: Vec<PathBuf> ) -> Result<(), Box<dyn Error>> {
+pub fn dwarf_dump_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
     let message = "NOTE: this comand is not finised".to_string().red();
     println!("{}", message);
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer)?;
+        let machine_file = MachineFile::parse(&buffer,false)?;
         // let dwarf = machine_file.load_dwarf()?;
         // println!("{:#?}",dwarf );
         list_dwarf_sections(&machine_file.obj);
@@ -138,12 +143,14 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer)?;
+        let mut machine_file = MachineFile::parse(&buffer,true)?;
         let debug = machine_file.get_addr2line().ok();
 
-        for section in &machine_file.sections {
+        for section in &mut machine_file.sections {
             match section {
-                Section::Code(code_section) => {
+                Section::Code(lazy) => {
+                    // lazy.disasm(&machine_file.obj.architecture())?;
+                    let LazyCondeSection::Done(code_section) = lazy else {unreachable!()};
                     println!(
                         "Code Section: {} ({} instructions)",
                         code_section.name.blue(),
@@ -195,7 +202,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
         // registry.add_file(file_path.clone())?;
 
         let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer)?;
+        let mut machine_file = MachineFile::parse(&buffer,true)?;
 
         let map = map_instructions_to_source(&mut machine_file)?;
         for (s, _) in map.values() {
@@ -204,7 +211,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
         filemaps.push(map);
     }
 
-    let mut source_files : Vec<_> = source_files.into_iter().collect();
+    let mut source_files: Vec<_> = source_files.into_iter().collect();
     source_files.sort();
 
     println!("Source files:");
@@ -214,11 +221,13 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
     Ok(())
 }
 
-
-pub fn view_source_command(file_path:&Path,look_all:bool,walk:bool,selections:Vec<FileSelection>) -> Result<(), Box<dyn Error>> {
-
+pub fn view_source_command(
+    file_path: &Path,
+    look_all: bool,
+    walk: bool,
+    selections: Vec<FileSelection>,
+) -> Result<(), Box<dyn Error>> {
     //we allow look_all and selections at the same time we simply ignore selctions
-
 
     if walk && (look_all || selections.len() > 1) {
         return Err("Can only walk in 1 file at a time".into());
@@ -230,7 +239,7 @@ pub fn view_source_command(file_path:&Path,look_all:bool,walk:bool,selections:Ve
 
     // Load and parse the binary
     let buffer = fs::read(file_path)?;
-    let mut machine_file = MachineFile::parse(&buffer)?;
+    let mut machine_file = MachineFile::parse(&buffer,true)?;
     let map = map_instructions_to_source(&mut machine_file)?;
 
     // Populate a unique list of source files in the order they appear
