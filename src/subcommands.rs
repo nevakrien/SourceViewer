@@ -182,7 +182,7 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
     Ok(())
 }
 
-pub fn view_sources_command(file_paths: Vec<PathBuf> ) -> Result<(), Box<dyn Error>> {
+pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
     // Initialize a basic editor interface
     // TODO: Use a library like `crossterm` to set up the interface
     // For now, placeholder logic to prompt file selection
@@ -214,10 +214,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf> ) -> Result<(), Box<dyn Err
 
 pub fn view_source_command(file_path:&Path,look_all:bool,walk:bool,selections:Vec<FileSelection>) -> Result<(), Box<dyn Error>> {
 
-    // Return an error if both `-a` is set and `selections` are provided
-    if look_all && selections.len() > 0 {
-        return Err("Cannot set both '--all' flag and specify selections. Please choose either to display all files or specific selections.".into());
-    }
+    //we allow look_all and selections at the same time we simply ignore selctions
 
 
     if walk && (look_all || selections.len() > 1) {

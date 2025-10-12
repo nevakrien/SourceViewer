@@ -1,9 +1,20 @@
+use std::path::Path;
+use std::env;
 use clap::Parser;
 use std::error::Error;
 use source_viewer::subcommands::*;
 use source_viewer::args::*;
 
 fn main() -> Result<(), Box<dyn Error>> {
+    //check for SourceViewer source
+    if env::args().nth(2).is_none(){
+        if let Some(first_arg) = env::args().nth(1){
+            return view_source_command(Path::new(&first_arg),false,false,Vec::new());
+        }
+
+    }
+
+    //normal parse
     let cli = Cli::parse();
 
     match &cli.command {
