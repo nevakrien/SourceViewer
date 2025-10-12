@@ -43,7 +43,7 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
     session.walk_directory_loop(&mut code_files, obj_file)
 }
 
-pub fn lines_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+pub fn lines_command(file_paths: Vec<PathBuf>,ignore_unknown:bool) -> Result<(), Box<dyn Error>> {
     let arena = Arena::new();
     let mut registry = AsmRegistry::new(&arena);
     // Iterate over each file path and process it
@@ -62,7 +62,12 @@ pub fn lines_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
                 for (_i, ins) in code_section.instructions.iter().enumerate() {
                     let (file, line) = match source_map.get(&ins.address) {
                         Some((f, l)) => (f.to_string(), l.to_string()),
-                        None => ("<unknown>".to_string(), "<unknown>".to_string()),
+                        None => {
+                            if ignore_unknown {
+                                continue;
+                            }
+                            ("<unknown>".to_string(), "<unknown>".to_string())
+                        },
                     };
                     let asm = format!(
                         "{:#010x}: {:<6} {:<15}",

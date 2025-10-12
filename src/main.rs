@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     match cli.command {
         Commands::Walk { opts } => walk_command(opts.bin.into()),
         Commands::Sections { opts } => sections_command(opts.bins),
-        Commands::Lines { opts } => lines_command(opts.bins),
+        Commands::Lines { opts,ignore_unknown } => lines_command(opts.bins,ignore_unknown),
         Commands::ViewSource(ViewSource {
             opts,
             all,

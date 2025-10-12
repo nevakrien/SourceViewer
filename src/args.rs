@@ -158,6 +158,9 @@ pub enum Commands {
     Lines {
         #[command(flatten)]
         opts: MultiBinOpts,
+
+        #[arg(long, help = "If set, instructions we could not find a symbol for will be omitted")]
+        ignore_unknown: bool,
     },
 
     #[command(
@@ -195,7 +198,7 @@ impl Commands {
         match self {
             Commands::Walk { opts } | Commands::ViewSource(ViewSource { opts, .. }) => opts.color,
             Commands::Sections { opts }
-            | Commands::Lines { opts }
+            | Commands::Lines { opts, .. }
             | Commands::ViewSources { opts }
             | Commands::DwarfDump { opts } => opts.color,
         }
