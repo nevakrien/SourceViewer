@@ -23,7 +23,7 @@ cargo binstall source_viewer
 # Quick Guide
 a typical workload would look something like 
 ```bash
-	SourceViewer view_source sample_code/build/linux_x86_64
+	SourceViewer sample_code/build/linux_x86_64
 ```
 ```
 	Source files:
@@ -34,7 +34,7 @@ a typical workload would look something like
 	4: "/snap/zig/11625/lib/libc/glibc/sysdeps/x86_64/start-2.33.S"
 ```
 ```bash
-	SourceViewer view_source sample_code/build/linux_x86_64 -w 0
+	SourceViewer sample_code/build/linux_x86_64 -w 0
 ```
 here we looked at the files that composed our binary and then went into the first file to view its contributions.
 

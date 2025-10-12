@@ -19,16 +19,15 @@ fn main() -> ExitCode {
     apply_color_mode(cli.get_color());
 
 
-    let res = 
-        match cli.command {
-            Commands::Walk { opts } => walk_command(opts.bin.into()),
-            Commands::Sections { opts } => sections_command(opts.bins),
-            Commands::Lines { opts, ignore_unknown } => lines_command(opts.bins, ignore_unknown),
-            Commands::ViewSource(ViewSource { opts, all, walk, selections }) =>
-                view_source_command(&opts.bin, all, walk, selections),
-            Commands::ViewSources { opts } => view_sources_command(opts.bins),
-            Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
-        };
+    let res = match cli.command {
+        Commands::Walk { opts } => walk_command(opts.bin.into()),
+        Commands::Sections { opts } => sections_command(opts.bins),
+        Commands::Lines { opts, ignore_unknown } => lines_command(opts.bins, ignore_unknown),
+        Commands::ViewSource(ViewSource { opts, all, walk, selections }) =>
+            view_source_command(&opts.bin, all, walk, selections),
+        Commands::ViewSources { opts } => view_sources_command(opts.bins),
+        Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
+    };
 
     ExitCode::from(match res {
         Ok(_) => 0,
