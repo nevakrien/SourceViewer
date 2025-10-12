@@ -1,3 +1,4 @@
+use clap::CommandFactory;
 use clap::builder::ValueParser;
 use clap::{Parser, Subcommand, ValueEnum};
 use colored::{Colorize, control::SHOULD_COLORIZE};
@@ -84,6 +85,26 @@ fn file_selection_parser() -> ValueParser {
     })
 }
 
+#[derive(Parser, Debug, Clone)]
+pub struct ViewSource {
+    #[command(flatten)]
+    pub opts: SingleBinOpts,
+
+    #[arg(short, long, help = "Show all source files")]
+    pub all: bool,
+
+    #[arg(short, long, help = "Start the walk command on the selected file")]
+    pub walk: bool,
+
+    #[arg(
+        value_name = "SELECTIONS",
+        num_args(0..),
+        value_parser = file_selection_parser(),
+        help = "Specific indices or file paths to display"
+    )]
+    pub selections: Vec<FileSelection>,
+}
+
 /// Top-level CLI
 #[derive(Parser, Debug)]
 #[command(
@@ -91,21 +112,23 @@ fn file_selection_parser() -> ValueParser {
     version = env!("CARGO_PKG_VERSION"),
     about = "A tool for viewing assembly and source information in binary files"
 )]
-
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Option<Commands>,
+    pub command: Commands,
 
-    #[arg(help = "Run view-sources without specifiying it by name",value_name = "BINS", required = false)]
-    pub bins: Vec<std::path::PathBuf>,
 }
 
 impl Cli {
     pub fn get_color(&self) -> ColorMode {
-        match &self.command {
-            Some(cmd) => cmd.get_color(),
-            None => ColorMode::Auto, // fallback if no command (e.g. direct binary path)
-        }
+       self.command.get_color()
+    }
+
+    pub fn is_subcommand_name(name: &str) -> bool {
+        let cmd = Self::command();
+
+        let x = cmd.get_subcommands().any(|sc| {
+            sc.get_name() == name || sc.get_all_aliases().any(|a| a == name)
+        }); x
     }
 }
 
@@ -130,27 +153,11 @@ pub enum Commands {
     },
 
     #[command(
+
         about = "Looks at the source code files that made the binary",
-        visible_aliases = ["view_source"]
+        visible_aliases = ["view_source",""]
     )]
-    ViewSource {
-        #[command(flatten)]
-        opts: SingleBinOpts,
-
-        #[arg(short, long, help = "Show all source files")]
-        all: bool,
-
-        #[arg(short, long, help = "Start the walk command on the selected file")]
-        walk: bool,
-
-        #[arg(
-            value_name = "SELECTIONS",
-            num_args(0..),
-            value_parser = file_selection_parser(),
-            help = "Specific indices or file paths to display"
-        )]
-        selections: Vec<FileSelection>,
-    },
+    ViewSource(ViewSource),
 
     #[command(
         about = "Dumps all source files used to make binaries",
@@ -179,7 +186,7 @@ impl Commands {
     pub fn get_color(&self)->ColorMode{
         match self{
             Commands::Walk { opts }
-            | Commands::ViewSource { opts, .. } => opts.color,
+            | Commands::ViewSource(ViewSource{ opts, .. }) => opts.color,
             Commands::Sections { opts }
             | Commands::Lines { opts }
             | Commands::ViewSources { opts }
