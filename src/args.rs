@@ -91,9 +91,22 @@ fn file_selection_parser() -> ValueParser {
     version = env!("CARGO_PKG_VERSION"),
     about = "A tool for viewing assembly and source information in binary files"
 )]
+
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
+
+    #[arg(help = "Run view-sources without specifiying it by name",value_name = "BINS", required = false)]
+    pub bins: Vec<std::path::PathBuf>,
+}
+
+impl Cli {
+    pub fn get_color(&self) -> ColorMode {
+        match &self.command {
+            Some(cmd) => cmd.get_color(),
+            None => ColorMode::Auto, // fallback if no command (e.g. direct binary path)
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -160,4 +173,17 @@ pub enum Commands {
         #[command(flatten)]
         opts: MultiBinOpts,
     },
+}
+
+impl Commands {
+    pub fn get_color(&self)->ColorMode{
+        match self{
+            Commands::Walk { opts }
+            | Commands::ViewSource { opts, .. } => opts.color,
+            Commands::Sections { opts }
+            | Commands::Lines { opts }
+            | Commands::ViewSources { opts }
+            | Commands::DwarfDump { opts } => opts.color
+        }
+    }
 }
