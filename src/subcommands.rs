@@ -222,7 +222,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
 
     let mut source_files: Vec<_> = source_files.into_iter().collect();
     source_files.sort();
-    
+
 
     println!("Source files:");
     for (index, file) in source_files.iter().enumerate() {
@@ -239,9 +239,10 @@ pub fn view_source_command(
 ) -> Result<(), Box<dyn Error>> {
     //we allow look_all and selections at the same time we simply ignore selctions
 
-    if walk && (look_all || selections.len() > 1) {
-        return Err("Can only walk in 1 file at a time".into());
-    }
+    //removing this just for dev
+    // if walk && (look_all || selections.len() > 1) {
+    //     return Err("Can only walk in 1 file at a time".into());
+    // }
 
     if walk && selections.len() == 0 {
         return Err("No walk selection provided".into());
@@ -308,12 +309,18 @@ pub fn view_source_command(
             .ok_or("No parent dir to path")?
             .to_path_buf();
 
+
+
         let mut state = GlobalState::start_from(parent)?;
         let mut session = TerminalSession::new(&mut state)?;
 
         //file
         {
             let mut file_state = crate::walk::load_file(session.state, file_path)?;
+            if let Some(FileSelection::Index(i)) = selections.get(1){
+                file_state.file_scroll = i.saturating_sub(1);
+                file_state.cursor = i.saturating_sub(1);
+            };
             let code_file = code_files.get_source_file(file_path.into())?;
             let mut last_frame = Instant::now();
             let res = TerminalSession::walk_file_loop(

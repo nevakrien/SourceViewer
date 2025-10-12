@@ -169,8 +169,8 @@ pub struct FileState<'me, 'arena> {
     // pub mode: Mode,
     file_content: Vec<Line<'arena>>,
 
-    file_scroll: usize,
-    cursor: usize,
+    pub file_scroll: usize,
+    pub cursor: usize,
     pub file_path: String,
 
     global: &'me mut GlobalState<'arena>,
