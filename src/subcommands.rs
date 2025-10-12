@@ -222,6 +222,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
 
     let mut source_files: Vec<_> = source_files.into_iter().collect();
     source_files.sort();
+    
 
     println!("Source files:");
     for (index, file) in source_files.iter().enumerate() {
@@ -265,6 +266,9 @@ pub fn view_source_command(
     }
 
     source_files.sort();
+    for (i,t) in source_files.iter().enumerate(){
+        *source_files_map.get_mut(t).unwrap()=i;
+    }
 
     if walk {
         let obj_file: Arc<Path> = file_path.into();
