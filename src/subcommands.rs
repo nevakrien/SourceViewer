@@ -1,3 +1,4 @@
+use crate::program_context::find_func_name;
 use crate::program_context::CodeRegistry;
 use crate::walk::FileResult;
 use crate::walk::GlobalState;
@@ -13,7 +14,7 @@ use crate::program_context::map_instructions_to_source;
 use crate::program_context::resolve_func_name;
 use crate::program_context::AddressFileMapping;
 use crate::program_context::AsmRegistry;
-use crate::program_context::format_inst_debug;
+// use crate::program_context::format_inst_debug;
 use colored::*;
 use std::collections::HashSet;
 use std::error::Error;
@@ -66,19 +67,27 @@ pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
         for section in &machine_file.sections.clone() {
             if let Section::Code(code_section) = section {
                 println!("{}", section.name());
-                for (i, instruction) in code_section.instructions.iter().enumerate() {
-                    if let Some((file, line)) = source_map.get(&instruction.address) {
+                for (_i, ins) in code_section.instructions.iter().enumerate() {
+                    let (file, line) = match source_map.get(&ins.address)  {
+                        Some((f,l))=>(f.to_string(),l.to_string()),
+                        None=>("<unknown>".to_string(),"<unknown>".to_string())
+                    };
+                    let asm = format!("{:#010x}: {:<6} {:<15}",
+                        ins.address,
+                        ins.mnemonic,
+                        ins.op_str, //this needs a fixup
+                    );
 
-                        println!(
-                            "{:<4} {} {} {} {} {} ",
-                            i.to_string().blue(),
-                            format_inst_debug(&instruction,&ctx,&mut registry).bold(),
-                            "in file".cyan(),
-                            file.to_string().yellow(),
-                            "at line".cyan(),
-                            line.to_string().blue()
-                        );
-                    }
+                    let func = find_func_name(&ctx, &mut registry, ins.address).unwrap_or("<unknown>".to_string());
+
+                    println!(
+                        "{} {} {}:{}",
+                        asm.bold(),
+                        func.cyan(),
+                        file.to_string().yellow(),
+                        line.to_string().blue()
+                    );
+                    
                 }
             }
         }

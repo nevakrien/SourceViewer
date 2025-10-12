@@ -218,9 +218,9 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
         }
     }
 
-    pub fn format_inst_debug(&mut self,ins:&InstructionDetail,debug:&DebugContext<'data>)->String{
-        format_inst_debug(ins,debug,self.asm)
-    }
+    // pub fn format_inst_debug(&mut self,ins:&InstructionDetail,debug:&DebugContext<'data>)->String{
+    //     format_inst_debug(ins,debug,self.asm)
+    // }
 
     pub fn get_existing_source_file(
         &self,
@@ -299,19 +299,19 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
     }
 }
 
-pub fn format_inst_debug<'a, 'b: 'a, 'c>(
-    ins: &InstructionDetail,
-    addr2line: &'c DebugContext<'a>,
-    registry: &mut AsmRegistry<'b>,
-) -> String {
-    format!(
-        "{:#010x}: {:<6} {:<30} {}",
-        ins.address,
-        ins.mnemonic,
-        ins.op_str, //this needs a fixup
-        find_func_name(addr2line, registry, ins.address).unwrap_or("<unknown>".to_string()),
-    )
-}
+// pub fn format_inst_debug<'a, 'b: 'a, 'c>(
+//     ins: &InstructionDetail,
+//     addr2line: &'c DebugContext<'a>,
+//     registry: &mut AsmRegistry<'b>,
+// ) -> String {
+//     format!(
+//         "{:#010x}: {:<6} {:<30} {}",
+//         ins.address,
+//         ins.mnemonic,
+//         ins.op_str, //this needs a fixup
+//         find_func_name(addr2line, registry, ins.address).unwrap_or("<unknown>".to_string()),
+//     )
+// }
 
 // pub struct DebugInstruction<'b, 'a> {
 //     ins: InstructionDetail,
