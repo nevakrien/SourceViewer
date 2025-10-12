@@ -25,8 +25,16 @@ pub fn apply_color_mode(mode: ColorMode) {
 /// Shared options for commands that take **one** binary
 #[derive(Parser, Debug, Clone)]
 pub struct SingleBinOpts {
-    #[arg(long, value_enum, default_value_t = ColorMode::Auto, global = true,
-          help = "Colorize output: always, auto, never")]
+    #[arg(
+        long,
+        value_enum,
+        num_args(0..=1),
+        default_missing_value = "always",
+        default_value_t = ColorMode::Auto,
+        global = true,
+        help = "Colorize output: always, auto, never (default: auto). \
+                Using --color without a value implies 'always'."
+    )]
     pub color: ColorMode,
 
     #[arg(value_name = "BIN", required = true,
