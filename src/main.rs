@@ -1,11 +1,15 @@
+use std::sync::atomic::Ordering;
+use std::sync::atomic::AtomicU8;
+use std::process::ExitCode;
 use std::panic;
 use clap::Parser;
 use source_viewer::args::*;
 use source_viewer::subcommands::*;
 use std::env;
-use std::error::Error;
 
-fn main() -> Result<(), Box<dyn Error>> {
+static ERR_EXIT_CODE : AtomicU8 = AtomicU8::new(1);
+
+fn main() -> ExitCode {
     let cli = match env::args().nth(1).as_deref()
     .map(|s| s.is_empty() | s.starts_with("-") | Cli::is_subcommand_name(s)) {
         Some(false) => Cli {
@@ -34,24 +38,32 @@ fn main() -> Result<(), Box<dyn Error>> {
         if is_broken_pipe {
             // print a short friendly message instead of a backtrace
             eprintln!("⚠️  Broken pipe: the output stream (stdout/stderr) closed early.");
-            std::process::exit(0);
+            ERR_EXIT_CODE.store(0,Ordering::Release);
+            return;
         }
 
         // Default behavior for all other panics
         eprintln!("\n[panic] {}", info);
     }));
 
-    match cli.command {
-        Commands::Walk { opts } => walk_command(opts.bin.into()),
-        Commands::Sections { opts } => sections_command(opts.bins),
-        Commands::Lines { opts,ignore_unknown } => lines_command(opts.bins,ignore_unknown),
-        Commands::ViewSource(ViewSource {
-            opts,
-            all,
-            walk,
-            selections,
-        }) => view_source_command(&opts.bin, all, walk, selections),
-        Commands::ViewSources { opts } => view_sources_command(opts.bins),
-        Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
-    }
+    let res = panic::catch_unwind(|| {
+        match cli.command {
+            Commands::Walk { opts } => walk_command(opts.bin.into()),
+            Commands::Sections { opts } => sections_command(opts.bins),
+            Commands::Lines { opts, ignore_unknown } => lines_command(opts.bins, ignore_unknown),
+            Commands::ViewSource(ViewSource { opts, all, walk, selections }) =>
+                view_source_command(&opts.bin, all, walk, selections),
+            Commands::ViewSources { opts } => view_sources_command(opts.bins),
+            Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
+        }
+    });
+
+    ExitCode::from(match res {
+        Ok(Ok(_)) => 0,
+        Ok(Err(e)) => {
+             eprintln!("{e}");
+             ERR_EXIT_CODE.load(Ordering::Acquire)
+        }
+        _=> ERR_EXIT_CODE.load(Ordering::Acquire),
+    })
 }
