@@ -79,3 +79,31 @@ pub fn downcast_chain_ref<'a, T:Error + 'static>(
         }
     }
 }
+
+use std::io;
+
+#[derive(Debug)]
+pub struct PrintError(pub io::Error);
+
+impl fmt::Display for PrintError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Print error: {}", self.0)
+    }
+}
+
+impl Error for PrintError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+/// Macro that behaves like println!, but if writing fails, returns Box<dyn Error>.
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {{
+        use std::io::{self, Write};
+        let mut stdout = io::stdout();
+        writeln!(stdout, $($arg)*)
+            .map_err(|e| Box::new($crate::errors::PrintError(e)) as Box<dyn std::error::Error>)?;
+    }};
+}

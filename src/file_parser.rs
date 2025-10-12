@@ -16,7 +16,6 @@ use gimli::{read::Dwarf, EndianSlice, SectionId};
 use std::error::Error;
 // pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
 // pub type FileMap = HashMap<Arc<Path>,LineMap>;
-
 #[derive(Debug, Default)]
 pub struct LineMap {
     inner: BTreeMap<u32, Vec<InstructionDetail>>,

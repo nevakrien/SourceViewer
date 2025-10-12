@@ -1,3 +1,4 @@
+
 use crate::file_parser::LazyCondeSection;
 use crate::args::FileSelection;
 use crate::program_context::find_func_name;
@@ -23,6 +24,8 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use typed_arena::Arena;
+
+use crate::println;
 
 pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let asm_arena = Arena::new();
@@ -95,7 +98,7 @@ pub fn lines_command(file_paths: Vec<PathBuf>,ignore_unknown:bool) -> Result<(),
 }
 
 use object::{File, Object, ObjectSection};
-fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) {
+fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) -> Result<(), Box<dyn std::error::Error>> {
     let sections = [
         ".debug_abbrev",
         ".debug_addr",
@@ -124,6 +127,7 @@ fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) {
             String::from_utf8_lossy(section_data)
         );
     }
+    Ok(())
 }
 
 pub fn dwarf_dump_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
@@ -136,7 +140,7 @@ pub fn dwarf_dump_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>
         let machine_file = MachineFile::parse(&buffer,false)?;
         // let dwarf = machine_file.load_dwarf()?;
         // println!("{:#?}",dwarf );
-        list_dwarf_sections(&machine_file.obj);
+        list_dwarf_sections(&machine_file.obj)?;
     }
     println!("{}", message);
 
