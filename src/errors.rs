@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::error::Error;
 use std::fmt;
 use std::rc::Rc;
@@ -59,5 +60,22 @@ impl fmt::Display for WrapedError {
 impl Error for WrapedError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(&*self.source) // Return the inner error as the source
+    }
+}
+pub fn downcast_chain_ref<'a, T:Error + 'static>(
+    origin: &'a (dyn Error+ 'static),
+) -> Option<&'a T> {
+    let mut err = origin;
+    loop {
+        // Try to downcast current error
+        if let Some(found) = err.downcast_ref::<T>() {
+            return Some(found);
+        }
+
+        // Move to next source in the chain
+        match err.source() {
+            Some(next) => err = next,
+            None => return None,
+        }
     }
 }

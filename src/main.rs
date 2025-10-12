@@ -1,3 +1,4 @@
+use std::panic;
 use clap::Parser;
 use source_viewer::args::*;
 use source_viewer::subcommands::*;
@@ -13,6 +14,31 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     apply_color_mode(cli.get_color());
+
+    panic::set_hook(Box::new(|info| {
+        // Try to detect a broken pipe panic
+        // we would of liked a specific downcast but no luck
+        // rusts defualt print errors with a str for some supid reason
+        let is_broken_pipe = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.contains("Broken pipe"))
+            .unwrap_or_else(|| {
+                info.payload()
+                    .downcast_ref::<String>()
+                    .map(|s| s.contains("Broken pipe"))
+                    .unwrap_or(false)
+            });
+
+        if is_broken_pipe {
+            // print a short friendly message instead of a backtrace
+            eprintln!("⚠️  Broken pipe: the output stream (stdout/stderr) closed early.");
+            std::process::exit(0);
+        }
+
+        // Default behavior for all other panics
+        eprintln!("\n[panic] {}", info);
+    }));
 
     match cli.command {
         Commands::Walk { opts } => walk_command(opts.bin.into()),
