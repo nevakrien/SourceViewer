@@ -23,7 +23,7 @@ pub fn apply_color_mode(mode: ColorMode) {
     }
 }
 
-/// Shared options for commands that take **one** binary
+// Shared options for commands that take **one** binary
 #[derive(Parser, Debug, Clone)]
 pub struct SingleBinOpts {
     #[arg(
@@ -33,8 +33,8 @@ pub struct SingleBinOpts {
         default_missing_value = "always",
         default_value_t = ColorMode::Auto,
         global = true,
-        help = "Colorize output: always, auto, never (default: auto). \
-                Using --color without a value implies 'always'."
+        display_order = 999,
+        help = "Colorize output for all stdout+stderr writes"
     )]
     pub color: ColorMode,
 
@@ -46,7 +46,7 @@ pub struct SingleBinOpts {
     pub bin: PathBuf,
 }
 
-/// Shared options for commands that take **multiple** binaries
+// Shared options for commands that take **multiple** binaries
 #[derive(Parser, Debug, Clone)]
 pub struct MultiBinOpts {
     #[arg(
@@ -56,6 +56,7 @@ pub struct MultiBinOpts {
         default_missing_value = "always",
         default_value_t = ColorMode::Auto,
         global = true,
+        display_order = 999,
         help = "Colorize output: always, auto, never (default: auto). \
                 Using --color without a value implies 'always'."
     )]
@@ -127,6 +128,10 @@ impl Cli {
 
     pub fn is_subcommand_name(name: &str) -> bool {
         let cmd = Self::command();
+
+        if name == "help" {
+            return true;
+        }
 
         let x = cmd
             .get_subcommands()
