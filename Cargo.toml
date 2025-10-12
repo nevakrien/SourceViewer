@@ -16,7 +16,7 @@ path = "src/main.rs"
 [dependencies]
 addr2line = "0.25.1"
 capstone = "0.13.0"
-clap = "4.5.21"
+clap = {version ="4.5.21", features = ["derive"]}
 colored = "2.1.0"
 crossterm = "0.29"
 gimli = { version = "0.32.3", features = ["read"] }

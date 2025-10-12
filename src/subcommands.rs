@@ -1,3 +1,4 @@
+use crate::args::FileSelection;
 use crate::program_context::find_func_name;
 use crate::program_context::CodeRegistry;
 use crate::walk::FileResult;
@@ -22,13 +23,7 @@ use std::fs;
 use std::path::PathBuf;
 use typed_arena::Arena;
 
-pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
-    let file_path: PathBuf = matches
-        .get_one::<PathBuf>("BIN") // Use `get_one` instead of `get_many`
-        .ok_or("BIN argument is required")?
-        .into(); // No need for `collect`, just convert directly to `PathBuf`
-    let obj_file: Arc<Path> = file_path.into();
-
+pub fn walk_command( obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let asm_arena = Arena::new();
     let code_arena = Arena::new();
     let mut registry = AsmRegistry::new(&asm_arena);
@@ -47,14 +42,7 @@ pub fn walk_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn std::error
     session.walk_directory_loop(&mut code_files, obj_file)
 }
 
-pub fn lines_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
-    // Collect all file paths provided by the user for the `lines` command
-    let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("BINS")
-        .ok_or("BINS argument is required")?
-        .cloned()
-        .collect();
-
+pub fn lines_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
     let arena = Arena::new();
     let mut registry = AsmRegistry::new(&arena);
     // Iterate over each file path and process it
@@ -128,14 +116,7 @@ fn list_dwarf_sections<'a>(obj_file: &'a File<'a>) {
     }
 }
 
-pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
-    // Collect all file paths provided by the user for the `sections` command
-    let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("BINS")
-        .ok_or("BINS argument is required")?
-        .cloned()
-        .collect();
-
+pub fn dwarf_dump_command(file_paths: Vec<PathBuf> ) -> Result<(), Box<dyn Error>> {
     let message = "NOTE: this comand is not finised".to_string().red();
     println!("{}", message);
     // Iterate over each file path and process it
@@ -152,14 +133,7 @@ pub fn dwarf_dump_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Erro
     Ok(())
 }
 
-pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
-    // Collect all file paths provided by the user for the `sections` command
-    let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("BINS")
-        .ok_or("BINS argument is required")?
-        .cloned()
-        .collect();
-
+pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
@@ -208,14 +182,7 @@ pub fn sections_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>
     Ok(())
 }
 
-pub fn view_sources_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
-    // Collect all file paths provided by the user for the `view_source` command
-    let file_paths: Vec<PathBuf> = matches
-        .get_many::<PathBuf>("BINS")
-        .expect("BINS argument is required")
-        .cloned()
-        .collect();
-
+pub fn view_sources_command(file_paths: Vec<PathBuf> ) -> Result<(), Box<dyn Error>> {
     // Initialize a basic editor interface
     // TODO: Use a library like `crossterm` to set up the interface
     // For now, placeholder logic to prompt file selection
@@ -244,32 +211,14 @@ pub fn view_sources_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-pub enum FileSelection {
-    Index(usize),
-    Path(PathBuf),
-}
 
-pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Error>> {
-    // Collect the binary path from the `BIN` argument
-    let file_path = matches
-        .get_one::<PathBuf>("BIN")
-        .ok_or("BIN argument is required")?;
-
-    // Check if the `-a` flag is set
-    let look_all = matches.get_flag("all");
-
-    // Gather selections (either indices or paths)
-    let mut selections = matches
-        .get_many::<FileSelection>("SELECTIONS")
-        .unwrap_or_default(); //.collect();
+pub fn view_source_command(file_path:&Path,look_all:bool,walk:bool,selections:Vec<FileSelection>) -> Result<(), Box<dyn Error>> {
 
     // Return an error if both `-a` is set and `selections` are provided
     if look_all && selections.len() > 0 {
         return Err("Cannot set both '--all' flag and specify selections. Please choose either to display all files or specific selections.".into());
     }
 
-    let walk = matches.get_flag("walk");
 
     if walk && (look_all || selections.len() > 1) {
         return Err("Can only walk in 1 file at a time".into());
@@ -300,7 +249,7 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
     source_files.sort();
 
     if walk {
-        let obj_file: Arc<Path> = file_path.as_path().into();
+        let obj_file: Arc<Path> = file_path.into();
         let asm_arena = Arena::new();
         let code_arena = Arena::new();
         let mut registry = AsmRegistry::new(&asm_arena);
@@ -309,7 +258,7 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
             .visit_machine_file(obj_file.clone())?
             .get_lines_map()?;
 
-        let file_path = match selections.next().unwrap() {
+        let file_path = match &selections[0] {
             FileSelection::Index(i) => {
                 if let Some(file) = source_files.get(*i) {
                     file
@@ -380,7 +329,7 @@ pub fn view_source_command(matches: &clap::ArgMatches) -> Result<(), Box<dyn Err
         for selection in selections {
             match selection {
                 FileSelection::Index(i) => {
-                    if let Some(file) = source_files.get(*i) {
+                    if let Some(file) = source_files.get(i) {
                         files_to_display.push(file);
                     } else {
                         println!("{}", format!("Index {} is out of bounds", i).red());
