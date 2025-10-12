@@ -6,7 +6,8 @@ use std::env;
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let cli = match env::args().nth(1).as_deref().map(Cli::is_subcommand_name) {
+    let cli = match env::args().nth(1).as_deref()
+    .map(|s| s.is_empty() | s.starts_with("-") | Cli::is_subcommand_name(s)) {
         Some(false) => Cli {
             command: Commands::ViewSource(ViewSource::parse()),
         },
