@@ -28,3 +28,6 @@ typed-arena = "2.0.2"
 [profile.dist]
 inherits = "release"
 lto = "thin"
+
+[profile.dev]
+panic = "abort"#gdb

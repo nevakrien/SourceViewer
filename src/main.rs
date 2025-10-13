@@ -1,3 +1,4 @@
+use source_viewer::skiper::dump_parts;
 use source_viewer::errors::downcast_chain_ref;
 use source_viewer::errors::PrintError;
 use std::process::ExitCode;
@@ -10,8 +11,11 @@ use std::env;
 fn main() -> ExitCode {
     let cli = match env::args().nth(1).as_deref()
     .map(|s| s.is_empty() | s.starts_with("-") | Cli::is_subcommand_name(s)) {
-        Some(false) => Cli {
-            command: Commands::ViewSource(ViewSource::parse()),
+        Some(false) => {
+            eprintln!("assuming view_source"); 
+            Cli {
+                command: Commands::ViewSource(ViewSource::parse()),
+            }
         },
         _ => Cli::parse(),
     };
@@ -27,6 +31,8 @@ fn main() -> ExitCode {
             view_source_command(&opts.bin, all, walk, selections),
         Commands::ViewSources { opts } => view_sources_command(opts.bins),
         Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
+        
+        Commands::DumpParts {opts } => {dump_parts(&opts.bin)},
     };
 
     ExitCode::from(match res {

@@ -97,7 +97,7 @@ pub struct ViewSource {
     #[arg(short, long, help = "Show all source files")]
     pub all: bool,
 
-    #[arg(short, long, help = "Start the walk command on the selected file")]
+    #[arg(short, long, help = "Start the walk command on the selected file optionally at a specific line")]
     pub walk: bool,
 
     #[arg(
@@ -191,6 +191,13 @@ pub enum Commands {
         #[command(flatten)]
         opts: MultiBinOpts,
     },
+
+    #[command(about = "used for dev")]
+    DumpParts {
+        #[command(flatten)]
+        opts: SingleBinOpts,
+    },
+
 }
 
 impl Commands {
@@ -201,6 +208,7 @@ impl Commands {
             | Commands::Lines { opts, .. }
             | Commands::ViewSources { opts }
             | Commands::DwarfDump { opts } => opts.color,
+            Commands::DumpParts { opts } => opts.color,
         }
     }
 }

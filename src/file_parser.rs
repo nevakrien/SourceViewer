@@ -98,11 +98,17 @@ impl LazyCondeSection<'_> {
     }
 
     pub fn disasm(&mut self, arch: &Architecture) -> Result<(), Box<dyn Error>> {
-        let LazyCondeSection::Pending(code_section) = self else {
+        let LazyCondeSection::Pending(_code_section) = self else {
             return Ok(());
         };
         // Disassemble executable sections
-        let cs = create_capstone(arch)?;
+        let mut cs = create_capstone(arch)?;
+        self.disasm_capstone(&mut cs)
+    }
+    pub fn disasm_capstone(&mut self,cs:&mut Capstone) -> Result<(), Box<dyn Error>> {
+        let LazyCondeSection::Pending(code_section) = self else {
+            return Ok(());
+        };
         let disasm = cs.disasm_all(code_section.data, code_section.address)?;
         let mut instructions = Vec::new();
         for (serial_number, insn) in disasm.iter().enumerate() {
@@ -255,8 +261,6 @@ impl<'a> MachineFile<'a> {
     pub fn parse(buffer: &'a [u8],parse_asm:bool) -> Result<MachineFile<'a>, Box<dyn Error>> {
         let obj = object::File::parse(buffer)?;
         let arch = obj.architecture();
-        let mut cs = create_capstone(&arch)?;
-        cs.set_skipdata(true)?;
         let mut parsed_sections = Vec::new();
 
         for section in obj.sections() {
@@ -264,39 +268,15 @@ impl<'a> MachineFile<'a> {
             let section_data = section.data()?;
 
             if should_disassemble(&section) {
-                if !parse_asm 
-                {   
-                    parsed_sections.push(Section::Code(LazyCondeSection::Pending(
-                        InfoSection{
-                            name: section_name,
-                            data: section_data,
-                            address: section.address(),
+               parsed_sections.push(Section::Code(LazyCondeSection::Pending(
+                    InfoSection{
+                        name: section_name,
+                        data: section_data,
+                        address: section.address(),
 
-                        }
-                    )));
-                    continue;
-                }
-                // Disassemble executable sections
-                let disasm = cs.disasm_all(section_data, section.address())?;
-                let mut instructions = Vec::new();
-                for (serial_number, insn) in disasm.iter().enumerate() {
-                    instructions.push(InstructionDetail {
-                        serial_number,
-                        address: insn.address(),
-                        mnemonic: insn
-                            .mnemonic()
-                            .unwrap_or("unknown")
-                            .to_owned()
-                            .into_boxed_str(),
-                        op_str: insn.op_str().unwrap_or("unknown").to_owned(),
-                        size: insn.len(),
-                    });
-                }
-
-                parsed_sections.push(Section::Code(LazyCondeSection::Done(CodeSection {
-                    name: section_name,
-                    instructions,
-                })));
+                    }
+                )));
+                
             } else {
                 // Collect non-executable sections
                 parsed_sections.push(Section::Info(InfoSection {
@@ -307,18 +287,50 @@ impl<'a> MachineFile<'a> {
             }
         }
 
-        Ok(MachineFile {
+        let mut ans = MachineFile {
             obj,
             sections: parsed_sections,
             dwarf: None.into(),
             addr2line: None.into(),
             file_lines: None.into(),
-        })
+        };
+
+        if parse_asm {
+            let need_ctx = false;
+
+            match(ans.get_addr2line(),need_ctx){
+                (Ok(_ctx),_)=>{
+                    slow_compile(&mut ans,&arch)?;
+
+                },
+                (Err(e),true)=>return Err(e),
+                (Err(_e),false)=>{
+                    //slow fallback
+                    // eprintln!("⚠️ failed to retrive dwarf info, runing slow single thread disassembler");
+                    slow_compile(&mut ans,&arch)?;
+                    
+                }
+            }
+            
+        }
+        Ok(ans)
     }
 }
 
+#[inline(always)]
+fn slow_compile(ans:&mut MachineFile,arch:&Architecture)->Result<(),Box<dyn Error>>{
+    let mut cs = create_capstone(&arch)?;
+    for s in ans.sections.iter_mut(){
+        match s {
+            Section::Code(c)=> c.disasm_capstone(&mut cs)?,
+            _=>{},
+        }
+    }
+    Ok(())
+}
+
 fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Error>> {
-    let cs = match arch {
+    let mut cs = match arch {
         object::Architecture::X86_64 => Capstone::new()
             .x86()
             .mode(x86::ArchMode::Mode64)
@@ -375,6 +387,7 @@ fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Erro
         // Add more architectures as needed
         _ => return Err("Unsupported architecture".into()),
     };
+    cs.set_skipdata(true)?;
     Ok(cs)
 }
 
@@ -404,3 +417,4 @@ fn should_disassemble(sec: &object::Section) -> bool {
         _ => todo!(),
     }
 }
+

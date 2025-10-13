@@ -1,0 +1,12 @@
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/intrinsics_gen.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/vt_gen.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/omp_gen.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/acc_gen.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/target_parser_gen.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/small_lang.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/test_compile.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/ast_repl.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/small.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/ast_printer.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/edit_cache.dir
+/home/user/Desktop/c_stuff/small-lang/build-profile/CMakeFiles/rebuild_cache.dir
