@@ -16,7 +16,7 @@ use crate::file_parser::Section;
 use crate::program_context::map_instructions_to_source;
 use crate::program_context::resolve_func_name;
 use crate::program_context::AddressFileMapping;
-use crate::program_context::AsmRegistry;
+use crate::program_context::FileRegistry;
 // use crate::program_context::format_inst_debug;
 use colored::*;
 use std::collections::HashSet;
@@ -30,7 +30,7 @@ use crate::println;
 pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let asm_arena = Arena::new();
     let code_arena = Arena::new();
-    let mut registry = AsmRegistry::new(&asm_arena);
+    let mut registry = FileRegistry::new(&asm_arena);
     let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
 
     println!("visiting file {:?}", &*obj_file);
@@ -48,7 +48,7 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
 
 pub fn lines_command(file_paths: Vec<PathBuf>,ignore_unknown:bool) -> Result<(), Box<dyn Error>> {
     let arena = Arena::new();
-    let mut registry = AsmRegistry::new(&arena);
+    let mut registry = FileRegistry::new(&arena);
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
@@ -275,7 +275,7 @@ pub fn view_source_command(
         let obj_file: Arc<Path> = file_path.into();
         let asm_arena = Arena::new();
         let code_arena = Arena::new();
-        let mut registry = AsmRegistry::new(&asm_arena);
+        let mut registry = FileRegistry::new(&asm_arena);
         let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
         code_files
             .visit_machine_file(obj_file.clone())?

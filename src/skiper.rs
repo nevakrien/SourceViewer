@@ -2,7 +2,7 @@
 
 use std::path::Path;
 use typed_arena::Arena;
-use crate::program_context::AsmRegistry;
+use crate::program_context::FileRegistry;
 use std::error::Error;
 use std::fs;
 use crate::file_parser::MachineFile;
@@ -478,7 +478,7 @@ pub fn iter_function_ranges<R: Reader<Offset = usize>>(
 
 pub fn dump_parts(path: &Path) -> Result<(), Box<dyn Error>> {
     let a = Arena::new();
-    let mut arena = AsmRegistry::new(&a);
+    let mut arena = FileRegistry::new(&a);
     let machine_file = arena.get_machine(path.into())?;
     let dwarf = machine_file.load_dwarf()?;
 

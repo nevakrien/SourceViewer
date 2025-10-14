@@ -1,7 +1,7 @@
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
 use object::Architecture;
 use object::{Object, ObjectSection, SectionFlags};
-use std::cell::Cell;
+use once_cell::unsync::OnceCell;
 use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -53,19 +53,14 @@ impl FileMap {
 
 type Endian<'a> = EndianSlice<'a, RunTimeEndian>;
 
-#[derive(Debug)]
-pub struct MachineFileInner<'a> {
-    pub obj: object::File<'a>,
-    pub sections: Vec<Section<'a>>,
-}
 
 // #[derive(Debug)]
 pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
-    pub sections: Vec<Section<'a>>,
-    dwarf: Cell<Option<Arc<Dwarf<Endian<'a>>>>>,
-    addr2line: Cell<Option<Arc<Context<Endian<'a>>>>>,
-    file_lines: Cell<Option<Arc<FileMap>>>, //line -> instruction>,
+    pub sections: Box<[Section<'a>]>,
+    dwarf: OnceCell<Arc<Dwarf<Endian<'a>>>>,
+    addr2line: OnceCell<Arc<Context<Endian<'a>>>>,
+    file_lines: Option<Arc<FileMap>>, //line -> instruction>
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -118,9 +113,8 @@ impl LazyCondeSection<'_> {
                 mnemonic: insn
                     .mnemonic()
                     .unwrap_or("unknown")
-                    .to_owned()
-                    .into_boxed_str(),
-                op_str: insn.op_str().unwrap_or("unknown").to_owned(),
+                    .into(),
+                op_str: insn.op_str().unwrap_or("unknown").into(),
                 size: insn.len(),
             });
         }
@@ -165,9 +159,8 @@ impl NewCodeSection<'_>{
                 mnemonic: insn
                     .mnemonic()
                     .unwrap_or("unknown")
-                    .to_owned()
-                    .into_boxed_str(),
-                op_str: insn.op_str().unwrap_or("unknown").to_owned(),
+                    .into(),
+                op_str: insn.op_str().unwrap_or("unknown").into(),
                 size: insn.len(),
             })?;
         }
@@ -195,15 +188,14 @@ pub struct InstructionDetail {
 
     pub address: u64,
     pub mnemonic: Box<str>,
-    pub op_str: String,
+    pub op_str: Box<str>,
     pub size: usize,
 }
 
 impl<'a> MachineFile<'a> {
     pub fn get_lines_map(&mut self) -> Result<Arc<FileMap>, Box<dyn Error>> {
-        if let Some(ans) = self.file_lines.replace(None) {
-            self.file_lines.set(Some(ans.clone()));
-            return Ok(ans);
+        if let Some(ans) = &self.file_lines{
+            return Ok(ans.clone());
         }
 
         let context = self.get_addr2line()?;
@@ -256,7 +248,7 @@ impl<'a> MachineFile<'a> {
             }
         }
 
-        self.file_lines.set(Some(ans.clone()));
+        self.file_lines=Some(ans.clone());
         Ok(ans)
     }
 
@@ -268,36 +260,25 @@ impl<'a> MachineFile<'a> {
     }
 
     pub fn load_dwarf(&self) -> Result<Arc<Dwarf<Endian<'a>>>, gimli::Error> {
-        if let Some(dwarf) = self.dwarf.replace(None) {
-            self.dwarf.set(Some(dwarf.clone()));
-            return Ok(dwarf);
-        }
+        self.dwarf.get_or_try_init(||{
+            let endian = if self.obj.is_little_endian() {
+                RunTimeEndian::Little
+            } else {
+                RunTimeEndian::Big
+            };
+            Dwarf::load(
+                |section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
+                    Ok(EndianSlice::new(self.get_gimli_section(section), endian))
+                },
+            ).map(Arc::new)
+        }).cloned()
 
-        let endian = if self.obj.is_little_endian() {
-            RunTimeEndian::Little
-        } else {
-            RunTimeEndian::Big
-        };
-        let dwarf = Dwarf::load(
-            |section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
-                Ok(EndianSlice::new(self.get_gimli_section(section), endian))
-            },
-        );
-
-        let dwarf = Arc::new(dwarf?);
-
-        self.dwarf.set(Some(dwarf.clone()));
-        Ok(dwarf)
     }
 
     pub fn get_addr2line(&self) -> Result<Arc<Context<Endian<'a>>>, Box<dyn Error>> {
-        if let Some(addr) = self.addr2line.replace(None) {
-            self.addr2line.set(Some(addr.clone()));
-            return Ok(addr);
-        }
-        self.addr2line
-            .set(Some(Context::from_arc_dwarf(self.load_dwarf()?)?.into()));
-        self.get_addr2line()
+        self.addr2line.get_or_try_init(||{
+            Ok(Context::from_arc_dwarf(self.load_dwarf()?)?.into())
+        }).cloned()
     }
 
     pub fn parse(buffer: &'a [u8],parse_asm:bool) -> Result<MachineFile<'a>, Box<dyn Error>> {
@@ -331,9 +312,9 @@ impl<'a> MachineFile<'a> {
 
         let mut ans = MachineFile {
             obj,
-            sections: parsed_sections,
-            dwarf: None.into(),
-            addr2line: None.into(),
+            sections: parsed_sections.into(),
+            dwarf: OnceCell::new(),
+            addr2line: OnceCell::new(),
             file_lines: None.into(),
         };
 

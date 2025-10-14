@@ -20,14 +20,14 @@ use typed_arena::Arena;
 
 //probably needed to handle the suplementry matrial
 
-pub struct AsmRegistry<'a> {
+pub struct FileRegistry<'a> {
     pub files_arena: &'a Arena<Vec<u8>>,
     pub map: HashMap<Arc<Path>, Result<MachineFile<'a>, WrapedError>>,
 }
 
-impl<'a> AsmRegistry<'a> {
+impl<'a> FileRegistry<'a> {
     pub fn new(files_arena: &'a Arena<Vec<u8>>) -> Self {
-        AsmRegistry {
+        FileRegistry {
             files_arena,
             map: HashMap::new(),
         }
@@ -106,7 +106,7 @@ pub fn resolve_func_name(addr2line: &DebugContext, address: u64) -> Option<Strin
 }
 pub fn find_func_name<'a, 'b: 'a>(
     addr2line: &DebugContext<'a>,
-    registry: &mut AsmRegistry<'b>,
+    registry: &mut FileRegistry<'b>,
     address: u64,
 ) -> Option<String> {
     let mut lookup_result = addr2line.find_frames(address);
@@ -198,7 +198,7 @@ impl CodeFile {
         self.asm.get(line)?.get(&path).map(|x| x.as_slice()) //.unwrap_or(&[])
     }
 
-    pub fn populate(&mut self, asm: &mut AsmRegistry<'_>, path: Arc<Path>) {
+    pub fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>) {
         for (obj_path, res) in asm.map.iter_mut() {
             let machine_file = match res {
                 Ok(x) => x,
@@ -236,14 +236,14 @@ impl CodeFile {
 
 pub struct CodeRegistry<'data, 'r> {
     pub source_files: HashMap<Arc<Path>, Result<&'r CodeFile, Box<WrapedError>>>,
-    pub asm: &'r mut AsmRegistry<'data>,
+    pub asm: &'r mut FileRegistry<'data>,
     arena: &'r Arena<CodeFile>,
     // pub visited : HashSet<Arc<Path>>,
-    // pub asm: AsmRegistry<'a>,
+    // pub asm: FileRegistry<'a>,
 }
 
 impl<'data, 'r> CodeRegistry<'data, 'r> {
-    pub fn new(asm: &'r mut AsmRegistry<'data>, arena: &'r Arena<CodeFile>) -> Self {
+    pub fn new(asm: &'r mut FileRegistry<'data>, arena: &'r Arena<CodeFile>) -> Self {
         CodeRegistry {
             asm,
             arena,
@@ -303,7 +303,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
 // pub fn format_inst_debug<'a, 'b: 'a, 'c>(
 //     ins: &InstructionDetail,
 //     addr2line: &'c DebugContext<'a>,
-//     registry: &mut AsmRegistry<'b>,
+//     registry: &mut FileRegistry<'b>,
 // ) -> String {
 //     format!(
 //         "{:#010x}: {:<6} {:<30} {}",
@@ -333,7 +333,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
 //     //     self.resolve_function_name(self.ins.address)
 //     // }
 
-//     pub fn get_string_load<'b: 'a>(&self, registry: &mut AsmRegistry<'b>) -> String {
+//     pub fn get_string_load<'b: 'a>(&self, registry: &mut FileRegistry<'b>) -> String {
 //         format!(
 //             "{:#010x}: {:<6} {:<30} {}",
 //             self.ins.address,
