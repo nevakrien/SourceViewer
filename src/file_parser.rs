@@ -53,127 +53,81 @@ impl FileMap {
 
 type Endian<'a> = EndianSlice<'a, RunTimeEndian>;
 
-
 // #[derive(Debug)]
 pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
     pub sections: Box<[Section<'a>]>,
     dwarf: OnceCell<Arc<Dwarf<Endian<'a>>>>,
     addr2line: OnceCell<Arc<Context<Endian<'a>>>>,
-    file_lines: Option<Arc<FileMap>>, //line -> instruction>
+    file_lines: OnceCell<Arc<FileMap>>, //line -> instruction>
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Section<'a> {
-    Code(LazyCondeSection<'a>),
+    Code(CodeSection<'a>),
     Info(InfoSection<'a>),
 }
 
 impl Section<'_> {
     pub fn name(&self) -> &str {
         match self {
-            Section::Code(x) => x.name(),
+            Section::Code(x) => &x.name,
             Section::Info(x) => &x.name,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum LazyCondeSection<'a> {
-    Done(CodeSection),
-    Pending(InfoSection<'a>),
-}
-
-impl LazyCondeSection<'_> {
-    pub fn name(&self) -> &str {
-        match self {
-            LazyCondeSection::Done(x) => &x.name,
-            LazyCondeSection::Pending(x) => &x.name,
-        }
-    }
-
-    pub fn disasm(&mut self, arch: &Architecture) -> Result<(), Box<dyn Error>> {
-        let LazyCondeSection::Pending(_code_section) = self else {
-            return Ok(());
-        };
-        // Disassemble executable sections
-        let mut cs = create_capstone(arch)?;
-        self.disasm_capstone(&mut cs)
-    }
-    pub fn disasm_capstone(&mut self,cs:&mut Capstone) -> Result<(), Box<dyn Error>> {
-        let LazyCondeSection::Pending(code_section) = self else {
-            return Ok(());
-        };
-        let disasm = cs.disasm_all(code_section.data, code_section.address)?;
-        let mut instructions = Vec::new();
-        for (serial_number, insn) in disasm.iter().enumerate() {
-            instructions.push(InstructionDetail {
-                serial_number,
-                address: insn.address(),
-                mnemonic: insn
-                    .mnemonic()
-                    .unwrap_or("unknown")
-                    .into(),
-                op_str: insn.op_str().unwrap_or("unknown").into(),
-                size: insn.len(),
-            });
-        }
-
-        *self = LazyCondeSection::Done(CodeSection {
-            name: code_section.name.clone(),
-            instructions: instructions.into(),
-        });
-
-        Ok(())
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct CodeSection {
-    pub name: Box<str>,
-    pub instructions: Arc<[InstructionDetail]>,
-}
-
-
-pub struct NewCodeSection<'a>{
+pub struct CodeSection<'a> {
     pub name: Box<str>,
     pub data: &'a [u8],
     pub address: u64,
-    cs:Capstone,
+    asm: OnceCell<Arc<[InstructionDetail]>>,
 }
 
-type Res =  Result<(),Box<dyn Error>>;
+// type Res =  Result<(),Box<dyn Error>>;
 
-impl NewCodeSection<'_>{
-    pub fn map_chunk(&self,start:u64,len:u64,f:&mut impl FnMut(InstructionDetail)->Res)->Res{
-        let end = (start+len) as usize;
-        let s = start as usize;
-        self._map_chunk(&self.data[s..end],start,f)
+fn dissasm(
+    cs: &Capstone,
+    data: &[u8],
+    address: u64,
+) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+    let disasm = cs.disasm_all(data, address)?;
+    let mut instructions = Vec::new();
+    for (serial_number, insn) in disasm.iter().enumerate() {
+        instructions.push(InstructionDetail {
+            serial_number,
+            address: insn.address(),
+            mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
+            op_str: insn.op_str().unwrap_or("unknown").into(),
+            size: insn.len(),
+        });
     }
-    fn _map_chunk(&self,data:&[u8],address:u64,f:&mut impl FnMut(InstructionDetail)->Res)-> Res{
-        let disasm = self.cs.disasm_all(data, address)?;
-        for (serial_number, insn) in disasm.iter().enumerate() {
-            f(InstructionDetail {
-                serial_number,
-                address: insn.address(),
-                mnemonic: insn
-                    .mnemonic()
-                    .unwrap_or("unknown")
-                    .into(),
-                op_str: insn.op_str().unwrap_or("unknown").into(),
-                size: insn.len(),
-            })?;
-        }
-        Ok(())
-    }
-    fn _disasm_chunk(&self,data:&[u8],address:u64) -> Result<Vec<InstructionDetail>, Box<dyn Error>>{
-        let mut instructions = Vec::new();
-        self._map_chunk(data, address,&mut |x|{Ok(instructions.push(x))})?;
-        Ok(instructions)
+    Ok(instructions.into())
+}
 
+impl CodeSection<'_> {
+    pub fn get_existing_asm(&self) -> Arc<[InstructionDetail]> {
+        self.asm.get().unwrap().clone()
+    }
+    pub fn get_asm(&self, arch: Architecture) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+        self.asm
+            .get_or_try_init(|| {
+                let cs = create_capstone(&arch)?;
+                dissasm(&cs, self.data, self.address)
+            })
+            .cloned()
+    }
+
+    pub fn get_asm_capstone(
+        &self,
+        cs: &Capstone,
+    ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+        self.asm
+            .get_or_try_init(|| dissasm(&cs, self.data, self.address))
+            .cloned()
     }
 }
-    
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InfoSection<'a> {
@@ -193,63 +147,58 @@ pub struct InstructionDetail {
 }
 
 impl<'a> MachineFile<'a> {
-    pub fn get_lines_map(&mut self) -> Result<Arc<FileMap>, Box<dyn Error>> {
-        if let Some(ans) = &self.file_lines{
-            return Ok(ans.clone());
-        }
+    //TODO make this not mut
+    pub fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
+        self.file_lines
+            .get_or_try_init(|| {
+                let context = self.get_addr2line()?;
 
-        let context = self.get_addr2line()?;
+                // let mut ans = Arc::new(HashMap::new());
+                let mut ans = Arc::new(FileMap::default());
+                let handle = Arc::get_mut(&mut ans).unwrap();
 
-        // let mut ans = Arc::new(HashMap::new());
-        let mut ans = Arc::new(FileMap::default());
-        let handle = Arc::get_mut(&mut ans).unwrap();
-
-        for code_section in self.sections.iter_mut().filter_map(|item| {
-            if let Section::Code(c) = item {
-                Some(c)
-            } else {
-                None
-            }
-        }) {
-            code_section.disasm(&self.obj.architecture())?;
-            let LazyCondeSection::Done(code) = code_section else {
-                unreachable!()
-            };
-            for instruction in code.instructions.iter() {
-                if let Ok(Some(loc)) = context.find_location(instruction.address) {
-                    match (loc.file, loc.line) {
-                        (Some(file_name), Some(line)) => {
-                            let file = Path::new(file_name).into();
-
-                            handle
-                                .inner
-                                .entry(file)
-                                .or_default()
-                                .inner
-                                .entry(line)
-                                .or_default()
-                                .push(instruction.clone());
-                        }
-                        (Some(file_name), None) => {
-                            let file = Path::new(file_name).into();
-
-                            handle
-                                .inner
-                                .entry(file)
-                                .or_default()
-                                .extra
-                                .push(instruction.clone());
-                        }
-                        (None, _) => todo!(),
+                for code_section in self.sections.iter().filter_map(|item| {
+                    if let Section::Code(c) = item {
+                        Some(c)
+                    } else {
+                        None
                     }
-                } else {
-                    handle.extra.push(instruction.clone())
-                }
-            }
-        }
+                }) {
+                    for instruction in code_section.get_asm(self.obj.architecture())?.iter() {
+                        if let Ok(Some(loc)) = context.find_location(instruction.address) {
+                            match (loc.file, loc.line) {
+                                (Some(file_name), Some(line)) => {
+                                    let file = Path::new(file_name).into();
 
-        self.file_lines=Some(ans.clone());
-        Ok(ans)
+                                    handle
+                                        .inner
+                                        .entry(file)
+                                        .or_default()
+                                        .inner
+                                        .entry(line)
+                                        .or_default()
+                                        .push(instruction.clone());
+                                }
+                                (Some(file_name), None) => {
+                                    let file = Path::new(file_name).into();
+
+                                    handle
+                                        .inner
+                                        .entry(file)
+                                        .or_default()
+                                        .extra
+                                        .push(instruction.clone());
+                                }
+                                (None, _) => todo!(),
+                            }
+                        } else {
+                            handle.extra.push(instruction.clone())
+                        }
+                    }
+                }
+                Ok(ans)
+            })
+            .cloned()
     }
 
     fn get_gimli_section(&self, section: SectionId) -> &'a [u8] {
@@ -260,28 +209,30 @@ impl<'a> MachineFile<'a> {
     }
 
     pub fn load_dwarf(&self) -> Result<Arc<Dwarf<Endian<'a>>>, gimli::Error> {
-        self.dwarf.get_or_try_init(||{
-            let endian = if self.obj.is_little_endian() {
-                RunTimeEndian::Little
-            } else {
-                RunTimeEndian::Big
-            };
-            Dwarf::load(
-                |section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
-                    Ok(EndianSlice::new(self.get_gimli_section(section), endian))
-                },
-            ).map(Arc::new)
-        }).cloned()
-
+        self.dwarf
+            .get_or_try_init(|| {
+                let endian = if self.obj.is_little_endian() {
+                    RunTimeEndian::Little
+                } else {
+                    RunTimeEndian::Big
+                };
+                Dwarf::load(
+                    |section| -> Result<EndianSlice<RunTimeEndian>, gimli::Error> {
+                        Ok(EndianSlice::new(self.get_gimli_section(section), endian))
+                    },
+                )
+                .map(Arc::new)
+            })
+            .cloned()
     }
 
     pub fn get_addr2line(&self) -> Result<Arc<Context<Endian<'a>>>, Box<dyn Error>> {
-        self.addr2line.get_or_try_init(||{
-            Ok(Context::from_arc_dwarf(self.load_dwarf()?)?.into())
-        }).cloned()
+        self.addr2line
+            .get_or_try_init(|| Ok(Context::from_arc_dwarf(self.load_dwarf()?)?.into()))
+            .cloned()
     }
 
-    pub fn parse(buffer: &'a [u8],parse_asm:bool) -> Result<MachineFile<'a>, Box<dyn Error>> {
+    pub fn parse(buffer: &'a [u8], parse_asm: bool) -> Result<MachineFile<'a>, Box<dyn Error>> {
         let obj = object::File::parse(buffer)?;
         let arch = obj.architecture();
         let mut parsed_sections = Vec::new();
@@ -291,15 +242,12 @@ impl<'a> MachineFile<'a> {
             let section_data = section.data()?;
 
             if should_disassemble(&section) {
-               parsed_sections.push(Section::Code(LazyCondeSection::Pending(
-                    InfoSection{
-                        name: section_name,
-                        data: section_data,
-                        address: section.address(),
-
-                    }
-                )));
-                
+                parsed_sections.push(Section::Code(CodeSection {
+                    name: section_name,
+                    data: section_data,
+                    address: section.address(),
+                    asm: OnceCell::new(),
+                }));
             } else {
                 // Collect non-executable sections
                 parsed_sections.push(Section::Info(InfoSection {
@@ -321,32 +269,31 @@ impl<'a> MachineFile<'a> {
         if parse_asm {
             let need_ctx = false;
 
-            match(ans.get_addr2line(),need_ctx){
-                (Ok(_ctx),_)=>{
-                    slow_compile(&mut ans,&arch)?;
-
-                },
-                (Err(e),true)=>return Err(e),
-                (Err(_e),false)=>{
+            match (ans.get_addr2line(), need_ctx) {
+                (Ok(_ctx), _) => {
+                    slow_compile(&mut ans, &arch)?;
+                }
+                (Err(e), true) => return Err(e),
+                (Err(_e), false) => {
                     //slow fallback
                     // eprintln!("⚠️ failed to retrive dwarf info, runing slow single thread disassembler");
-                    slow_compile(&mut ans,&arch)?;
-                    
+                    slow_compile(&mut ans, &arch)?;
                 }
             }
-            
         }
         Ok(ans)
     }
 }
 
 #[inline(always)]
-fn slow_compile(ans:&mut MachineFile,arch:&Architecture)->Result<(),Box<dyn Error>>{
-    let mut cs = create_capstone(&arch)?;
-    for s in ans.sections.iter_mut(){
+fn slow_compile(ans: &mut MachineFile, arch: &Architecture) -> Result<(), Box<dyn Error>> {
+    let cs = create_capstone(&arch)?;
+    for s in ans.sections.iter_mut() {
         match s {
-            Section::Code(c)=> c.disasm_capstone(&mut cs)?,
-            _=>{},
+            Section::Code(c) => {
+                c.get_asm_capstone(&cs)?;
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -440,4 +387,3 @@ fn should_disassemble(sec: &object::Section) -> bool {
         _ => todo!(),
     }
 }
-

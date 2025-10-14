@@ -61,8 +61,8 @@ impl Error for WrapedError {
         Some(&*self.source) // Return the inner error as the source
     }
 }
-pub fn downcast_chain_ref<'a, T:Error + 'static>(
-    origin: &'a (dyn Error+ 'static),
+pub fn downcast_chain_ref<'a, T: Error + 'static>(
+    origin: &'a (dyn Error + 'static),
 ) -> Option<&'a T> {
     let mut err = origin;
     loop {

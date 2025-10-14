@@ -1,5 +1,3 @@
-use crate::file_parser::LazyCondeSection;
-use object::Object;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
 use crate::file_parser::InstructionDetail;
@@ -9,6 +7,7 @@ use addr2line::LookupContinuation;
 use addr2line::LookupResult;
 use gimli::EndianSlice;
 use gimli::RunTimeEndian;
+use object::Object;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs;
@@ -53,7 +52,7 @@ impl<'a> FileRegistry<'a> {
                 };
                 let b = self.files_arena.alloc(buffer);
                 entry
-                    .insert(MachineFile::parse(b,false).map_err(WrapedError::new))
+                    .insert(MachineFile::parse(b, false).map_err(WrapedError::new))
                     .as_mut()
                     .map_err(|e| e.clone().into())
             }
@@ -64,20 +63,18 @@ impl<'a> FileRegistry<'a> {
 pub type AddressFileMapping = HashMap<u64, (String, u32)>; // address -> (file, line)
 
 pub fn map_instructions_to_source(
-    machine_file: &mut MachineFile,
+    machine_file: &MachineFile,
 ) -> Result<AddressFileMapping, Box<dyn Error>> {
     let mut mapping = AddressFileMapping::new();
 
     // Create addr2line context from DWARF data
     let ctx = machine_file.get_addr2line()?;
+    let arch = machine_file.obj.architecture();
 
     // Iterate through each code section and map addresses to source
-    for section in &mut machine_file.sections {
-        if let Section::Code(lazy) = section {
-            lazy.disasm(&machine_file.obj.architecture())?;
-            let LazyCondeSection::Done(code_section) = lazy else {unreachable!()};
-            
-            for instruction in code_section.instructions.iter() {
+    for section in &machine_file.sections {
+        if let Section::Code(code_section) = section {
+            for instruction in code_section.get_asm(arch)?.iter() {
                 if let Ok(Some(loc)) = ctx.find_location(instruction.address) {
                     let file = loc.file.unwrap_or("<unknown>").to_string();
                     let line = loc.line.unwrap_or(0);

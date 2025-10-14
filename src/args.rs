@@ -97,7 +97,11 @@ pub struct ViewSource {
     #[arg(short, long, help = "Show all source files")]
     pub all: bool,
 
-    #[arg(short, long, help = "Start the walk command on the selected file optionally at a specific line")]
+    #[arg(
+        short,
+        long,
+        help = "Start the walk command on the selected file optionally at a specific line"
+    )]
     pub walk: bool,
 
     #[arg(
@@ -159,7 +163,10 @@ pub enum Commands {
         #[command(flatten)]
         opts: MultiBinOpts,
 
-        #[arg(long, help = "If set, instructions we could not find a symbol for will be omitted")]
+        #[arg(
+            long,
+            help = "If set, instructions we could not find a symbol for will be omitted"
+        )]
         ignore_unknown: bool,
     },
 
@@ -197,7 +204,6 @@ pub enum Commands {
         #[command(flatten)]
         opts: SingleBinOpts,
     },
-
 }
 
 impl Commands {

@@ -1,5 +1,3 @@
-
-use crate::file_parser::LazyCondeSection;
 use crate::args::FileSelection;
 use crate::program_context::find_func_name;
 use crate::program_context::CodeRegistry;
@@ -46,23 +44,22 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
     session.walk_directory_loop(&mut code_files, obj_file)
 }
 
-pub fn lines_command(file_paths: Vec<PathBuf>,ignore_unknown:bool) -> Result<(), Box<dyn Error>> {
+pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(), Box<dyn Error>> {
     let arena = Arena::new();
     let mut registry = FileRegistry::new(&arena);
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let machine_file = registry.get_machine(file_path.into())?;
+        let arch = machine_file.obj.architecture();
         let ctx = machine_file.get_addr2line()?;
         let source_map = map_instructions_to_source(machine_file)?;
 
         for section in &machine_file.sections.clone() {
-            if let Section::Code(lazy) = section {
+            if let Section::Code(code_section) = section {
                 println!("{}", section.name());
-                
-                let LazyCondeSection::Done(code_section) = lazy else {unreachable!()};
 
-                for (_i, ins) in code_section.instructions.iter().enumerate() {
+                for (_i, ins) in code_section.get_asm(arch)?.iter().enumerate() {
                     let (file, line) = match source_map.get(&ins.address) {
                         Some((f, l)) => (f.to_string(), l.to_string()),
                         None => {
@@ -70,7 +67,7 @@ pub fn lines_command(file_paths: Vec<PathBuf>,ignore_unknown:bool) -> Result<(),
                                 continue;
                             }
                             ("<unknown>".to_string(), "<unknown>".to_string())
-                        },
+                        }
                     };
                     let asm = format!(
                         "{:#010x}: {:<6} {:<15}",
@@ -137,7 +134,7 @@ pub fn dwarf_dump_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer,false)?;
+        let machine_file = MachineFile::parse(&buffer, false)?;
         // let dwarf = machine_file.load_dwarf()?;
         // println!("{:#?}",dwarf );
         list_dwarf_sections(&machine_file.obj)?;
@@ -152,21 +149,20 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer,true)?;
+        let mut machine_file = MachineFile::parse(&buffer, true)?;
         let debug = machine_file.get_addr2line().ok();
 
         for section in &mut machine_file.sections {
             match section {
-                Section::Code(lazy) => {
+                Section::Code(code_section) => {
                     // lazy.disasm(&machine_file.obj.architecture())?;
-                    let LazyCondeSection::Done(code_section) = lazy else {unreachable!()};
                     println!(
                         "Code Section: {} ({} instructions)",
                         code_section.name.blue(),
-                        code_section.instructions.len()
+                        code_section.get_existing_asm().len()
                     );
 
-                    for instruction in code_section.instructions.iter() {
+                    for instruction in code_section.get_existing_asm().iter() {
                         let func_name = match &debug {
                             None => None,
                             Some(ctx) => resolve_func_name(ctx, instruction.address),
@@ -211,7 +207,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
         // registry.add_file(file_path.clone())?;
 
         let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer,true)?;
+        let mut machine_file = MachineFile::parse(&buffer, true)?;
 
         let map = map_instructions_to_source(&mut machine_file)?;
         for (s, _) in map.values() {
@@ -222,7 +218,6 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
 
     let mut source_files: Vec<_> = source_files.into_iter().collect();
     source_files.sort();
-
 
     println!("Source files:");
     for (index, file) in source_files.iter().enumerate() {
@@ -250,7 +245,7 @@ pub fn view_source_command(
 
     // Load and parse the binary
     let buffer = fs::read(file_path)?;
-    let mut machine_file = MachineFile::parse(&buffer,true)?;
+    let mut machine_file = MachineFile::parse(&buffer, true)?;
     let map = map_instructions_to_source(&mut machine_file)?;
 
     // Populate a unique list of source files in the order they appear
@@ -267,8 +262,8 @@ pub fn view_source_command(
     }
 
     source_files.sort();
-    for (i,t) in source_files.iter().enumerate(){
-        *source_files_map.get_mut(t).unwrap()=i;
+    for (i, t) in source_files.iter().enumerate() {
+        *source_files_map.get_mut(t).unwrap() = i;
     }
 
     if walk {
@@ -309,15 +304,13 @@ pub fn view_source_command(
             .ok_or("No parent dir to path")?
             .to_path_buf();
 
-
-
         let mut state = GlobalState::start_from(parent)?;
         let mut session = TerminalSession::new(&mut state)?;
 
         //file
         {
             let mut file_state = crate::walk::load_file(session.state, file_path)?;
-            if let Some(FileSelection::Index(i)) = selections.get(1){
+            if let Some(FileSelection::Index(i)) = selections.get(1) {
                 file_state.file_scroll = i.saturating_sub(1);
                 file_state.cursor = i.saturating_sub(1);
             };

@@ -1,11 +1,11 @@
 #![allow(non_upper_case_globals)]
 
-use std::path::Path;
-use typed_arena::Arena;
+use crate::file_parser::MachineFile;
 use crate::program_context::FileRegistry;
 use std::error::Error;
 use std::fs;
-use crate::file_parser::MachineFile;
+use std::path::Path;
+use typed_arena::Arena;
 // use gimli::{DW_AT_call_origin,DW_AT_ranges,DW_AT_entry_pc,DW_AT_declaration,AttributeValue, Dwarf, Reader, DW_AT_high_pc, DW_AT_low_pc, DW_AT_name, DW_TAG_subprogram};
 
 // /// Return (name, low_pc, high_pc)
@@ -16,7 +16,6 @@ use crate::file_parser::MachineFile;
 
 //     let mut units = dwarf.units();
 //     // println!("units {units:?}");
-
 
 //     while let Some(header) = units.next()? {
 //         // println!("header {header:?}");
@@ -93,21 +92,20 @@ use crate::file_parser::MachineFile;
 //                 }
 //             }else{
 //                 // println!("whats this entry {}",entry.tag());
-//             }   
+//             }
 //         }
 //     }
 
 //     Ok(results)
 // }
 
-use gimli::{
-    AttributeValue, DebuggingInformationEntry, Dwarf, Reader, Unit, UnitOffset,
-    DW_AT_call_origin, DW_AT_declaration, DW_AT_entry_pc, DW_AT_high_pc,
-    DW_AT_low_pc, DW_AT_name, DW_AT_ranges,DW_AT_dwo_name,
-};
-use gimli::ReaderOffset;
 use gimli::RangeListsOffset;
-
+use gimli::ReaderOffset;
+use gimli::{
+    AttributeValue, DW_AT_call_origin, DW_AT_declaration, DW_AT_dwo_name, DW_AT_entry_pc,
+    DW_AT_high_pc, DW_AT_low_pc, DW_AT_name, DW_AT_ranges, DebuggingInformationEntry, Dwarf,
+    Reader, Unit, UnitOffset,
+};
 
 // pub fn iter_function_ranges<R: Reader<Offset = usize>>(
 //     dwarf: &Dwarf<R>,
@@ -254,7 +252,6 @@ use gimli::RangeListsOffset;
 //     Ok(results)
 // }
 
-
 pub fn iter_function_ranges<R: Reader<Offset = usize>>(
     dwarf: &Dwarf<R>,
 ) -> gimli::Result<Vec<(Option<String>, u64, Option<u64>)>> {
@@ -323,12 +320,8 @@ pub fn iter_function_ranges<R: Reader<Offset = usize>>(
                     DW_AT_call_origin => {
                         if let AttributeValue::UnitRef(off) = attr.value() {
                             if let Ok(origin_entry) = unit.entry(off) {
-                                if let Some(name_attr_val) =
-                                    origin_entry.attr_value(DW_AT_name)?
-                                {
-                                    if let Ok(s) =
-                                        dwarf.attr_string(&unit, name_attr_val)
-                                    {
+                                if let Some(name_attr_val) = origin_entry.attr_value(DW_AT_name)? {
+                                    if let Ok(s) = dwarf.attr_string(&unit, name_attr_val) {
                                         name = Some(s.to_string_lossy()?.into_owned());
                                     }
                                 }
@@ -344,7 +337,7 @@ pub fn iter_function_ranges<R: Reader<Offset = usize>>(
             }
 
             // Print all address-bearing DIEs
-             {
+            {
                 println!("------------------------------------------------");
                 println!(
                     "Tag: {:?}, name: {:?}",
@@ -363,15 +356,11 @@ pub fn iter_function_ranges<R: Reader<Offset = usize>>(
                 if let Some(idx) = ranges_index {
                     println!("  ranges:  DebugRngListsIndex({idx})");
 
-                    if let Some(offset) =
-                        ranges_index.map(|i| gimli::RangeListsOffset(i as usize))
+                    if let Some(offset) = ranges_index.map(|i| gimli::RangeListsOffset(i as usize))
                     {
                         if let Ok(mut iter) = dwarf.ranges(&unit, offset) {
                             while let Ok(Some(r)) = iter.next() {
-                                println!(
-                                    "    range: [0x{:x} - 0x{:x})",
-                                    r.begin, r.end
-                                );
+                                println!("    range: [0x{:x} - 0x{:x})", r.begin, r.end);
                             }
                         }
                     }
@@ -474,8 +463,6 @@ pub fn iter_function_ranges<R: Reader<Offset = usize>>(
 //     Ok(results)
 // }
 
-
-
 pub fn dump_parts(path: &Path) -> Result<(), Box<dyn Error>> {
     let a = Arena::new();
     let mut arena = FileRegistry::new(&a);
@@ -484,15 +471,27 @@ pub fn dump_parts(path: &Path) -> Result<(), Box<dyn Error>> {
 
     let found = iter_function_ranges(&dwarf)?;
     if found.is_empty() {
-        println!("No DW_TAG_subprogram entries with DW_AT_low_pc found in {:?}", path);
+        println!(
+            "No DW_TAG_subprogram entries with DW_AT_low_pc found in {:?}",
+            path
+        );
         return Ok(());
     }
 
     println!("Functions found in {:?}:", path);
     for (name, low, high) in found {
         match high {
-            Some(hp) => println!("{:<40} 0x{:016x} - 0x{:016x}", name.unwrap_or_else(|| "<unnamed>".into()), low, hp),
-            None => println!("{:<40} 0x{:016x}", name.unwrap_or_else(|| "<unnamed>".into()), low),
+            Some(hp) => println!(
+                "{:<40} 0x{:016x} - 0x{:016x}",
+                name.unwrap_or_else(|| "<unnamed>".into()),
+                low,
+                hp
+            ),
+            None => println!(
+                "{:<40} 0x{:016x}",
+                name.unwrap_or_else(|| "<unnamed>".into()),
+                low
+            ),
         }
     }
 
