@@ -263,7 +263,7 @@ impl<'a> MachineFile<'a> {
             sections: parsed_sections.into(),
             dwarf: OnceCell::new(),
             addr2line: OnceCell::new(),
-            file_lines: None.into(),
+            file_lines:OnceCell::new(),
         };
 
         if parse_asm {
@@ -297,6 +297,15 @@ fn slow_compile(ans: &mut MachineFile, arch: &Architecture) -> Result<(), Box<dy
         }
     }
     Ok(())
+}
+
+fn get_first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
+    let mut iter = ctx.find_location_range(start,end)?;
+    if let Some((start,_,_)) = iter.next(){
+        Ok(Some(start))
+    }else{
+        Ok(None)
+    }
 }
 
 fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Error>> {

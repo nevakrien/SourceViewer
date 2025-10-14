@@ -1,5 +1,9 @@
 #![allow(non_upper_case_globals)]
 
+use colored::Colorize;
+use object::Object;
+use crate::file_parser::Section;
+use std::sync::Arc;
 use crate::file_parser::MachineFile;
 use crate::program_context::FileRegistry;
 use std::error::Error;
@@ -511,3 +515,76 @@ pub fn dump_parts(path: &Path) -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+
+// pub fn dump_parts(path: &Path) -> Result<(), Box<dyn Error>> {
+//     // Setup arena and registry (same as your other commands)
+//     let arena = typed_arena::Arena::new();
+//     let mut registry = FileRegistry::new(&arena);
+
+//     // Load the machine file
+//     let machine_file = registry.get_machine(Arc::from(path))?;
+//     let ctx = machine_file.get_addr2line()?;
+//     let arch = machine_file.obj.architecture();
+
+//     println!("{}", format!("Testing {:?}", path).green().bold());
+
+//     // Iterate over each code section
+//     for section in &machine_file.sections {
+//         if let Section::Code(code_section) = section {
+//             println!("\nSection: {}", section.name());
+//             let start_addr = code_section.address;
+//             let end_addr = start_addr + code_section.data.len() as u64;
+
+//             println!(
+//                 "Using find_location_range over [{:#x}..{:#x})",
+//                 start_addr, end_addr
+//             );
+
+//             let mut ranges = ctx.find_location_range(start_addr, end_addr)?;
+//             while let Some((addr, size, loc)) = ranges.next() {
+//                 let file = loc
+//                     .file
+//                     .map(|f| f.to_string())
+//                     .unwrap_or_else(|| "<unknown>".into());
+//                 let line = loc.line.unwrap_or(0);
+
+//                 println!(
+//                     "{:>016x} + {:#x}  =>  {}:{}",
+//                     addr, size, file, line
+//                 );
+
+//                 // Now check a few addresses within this region
+//                 let sample_points = [addr, addr + 1, addr + size.saturating_sub(1), addr + size];
+//                 for &probe in &sample_points {
+//                     let found = ctx.find_location(probe)?;
+//                     let mark = match &found {
+//                         Some(found_loc)
+//                             if found_loc.file == loc.file && found_loc.line == loc.line =>
+//                         {
+//                             "✅"
+//                         }
+//                         Some(_) => "⚠️",
+//                         None => "❌",
+//                     };
+//                     println!("    {:>016x} -> {}", probe, mark);
+//                 }
+
+//                 // Optional: show a disassembly snippet for context
+//                 let disasm = code_section.get_asm(arch)?;
+//                 let count = disasm
+//                     .iter()
+//                     .filter(|ins| ins.address >= addr && ins.address < addr + size)
+//                     .take(3);
+//                 for ins in count {
+//                     println!(
+//                         "        {:#010x}: {:<6} {:<15}",
+//                         ins.address, ins.mnemonic, ins.op_str
+//                     );
+//                 }
+//             }
+//         }
+//     }
+
+//     Ok(())
+// }
