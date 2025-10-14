@@ -127,7 +127,7 @@ impl LazyCondeSection<'_> {
 
         *self = LazyCondeSection::Done(CodeSection {
             name: code_section.name.clone(),
-            instructions,
+            instructions: instructions.into(),
         });
 
         Ok(())
@@ -137,8 +137,50 @@ impl LazyCondeSection<'_> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CodeSection {
     pub name: Box<str>,
-    pub instructions: Vec<InstructionDetail>,
+    pub instructions: Arc<[InstructionDetail]>,
 }
+
+
+pub struct NewCodeSection<'a>{
+    pub name: Box<str>,
+    pub data: &'a [u8],
+    pub address: u64,
+    cs:Capstone,
+}
+
+type Res =  Result<(),Box<dyn Error>>;
+
+impl NewCodeSection<'_>{
+    pub fn map_chunk(&self,start:u64,len:u64,f:&mut impl FnMut(InstructionDetail)->Res)->Res{
+        let end = (start+len) as usize;
+        let s = start as usize;
+        self._map_chunk(&self.data[s..end],start,f)
+    }
+    fn _map_chunk(&self,data:&[u8],address:u64,f:&mut impl FnMut(InstructionDetail)->Res)-> Res{
+        let disasm = self.cs.disasm_all(data, address)?;
+        for (serial_number, insn) in disasm.iter().enumerate() {
+            f(InstructionDetail {
+                serial_number,
+                address: insn.address(),
+                mnemonic: insn
+                    .mnemonic()
+                    .unwrap_or("unknown")
+                    .to_owned()
+                    .into_boxed_str(),
+                op_str: insn.op_str().unwrap_or("unknown").to_owned(),
+                size: insn.len(),
+            })?;
+        }
+        Ok(())
+    }
+    fn _disasm_chunk(&self,data:&[u8],address:u64) -> Result<Vec<InstructionDetail>, Box<dyn Error>>{
+        let mut instructions = Vec::new();
+        self._map_chunk(data, address,&mut |x|{Ok(instructions.push(x))})?;
+        Ok(instructions)
+
+    }
+}
+    
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InfoSection<'a> {
@@ -181,7 +223,7 @@ impl<'a> MachineFile<'a> {
             let LazyCondeSection::Done(code) = code_section else {
                 unreachable!()
             };
-            for instruction in &code.instructions {
+            for instruction in code.instructions.iter() {
                 if let Ok(Some(loc)) = context.find_location(instruction.address) {
                     match (loc.file, loc.line) {
                         (Some(file_name), Some(line)) => {

@@ -166,7 +166,7 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
                         code_section.instructions.len()
                     );
 
-                    for instruction in &code_section.instructions {
+                    for instruction in code_section.instructions.iter() {
                         let func_name = match &debug {
                             None => None,
                             Some(ctx) => resolve_func_name(ctx, instruction.address),

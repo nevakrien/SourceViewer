@@ -5,7 +5,6 @@ use crate::errors::WrapedError;
 use crate::file_parser::InstructionDetail;
 use crate::file_parser::MachineFile;
 use crate::file_parser::Section;
-use addr2line::Context;
 use addr2line::LookupContinuation;
 use addr2line::LookupResult;
 use gimli::EndianSlice;
@@ -70,7 +69,7 @@ pub fn map_instructions_to_source(
     let mut mapping = AddressFileMapping::new();
 
     // Create addr2line context from DWARF data
-    let ctx = Context::from_arc_dwarf(machine_file.load_dwarf()?)?;
+    let ctx = machine_file.get_addr2line()?;
 
     // Iterate through each code section and map addresses to source
     for section in &mut machine_file.sections {
@@ -78,7 +77,7 @@ pub fn map_instructions_to_source(
             lazy.disasm(&machine_file.obj.architecture())?;
             let LazyCondeSection::Done(code_section) = lazy else {unreachable!()};
             
-            for instruction in &code_section.instructions {
+            for instruction in code_section.instructions.iter() {
                 if let Ok(Some(loc)) = ctx.find_location(instruction.address) {
                     let file = loc.file.unwrap_or("<unknown>").to_string();
                     let line = loc.line.unwrap_or(0);
