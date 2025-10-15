@@ -122,7 +122,13 @@ fn merge_linked_lists(
         .collect();
 
     // Sort ascending by first address of the next_block
-    streams.sort_by_key(|stream| stream.next_block.first().unwrap().address);
+    streams.sort_by_key(|stream| {
+        stream
+            .next_block
+            .first()
+            .map(|ins| ins.address)
+            .unwrap_or(u64::MAX)
+    });
 
     let mut merged: Vec<InstructionDetail> = Vec::new();
 
@@ -132,17 +138,27 @@ fn merge_linked_lists(
 
         // Advance this stream
         if let Some(next_block) = stream.remaining_blocks.next() {
-            let first_address = next_block.first().unwrap().address;
+            if next_block.is_empty() {
+                continue;
+            }
+            let first_address = next_block.first().unwrap().address;//this is actually a bad unwrap
             stream.next_block = next_block;
 
             // Manual insertion (bubble-up) to keep streams sorted ascending by address
             let mut insert_index = streams.len();
-            while insert_index > 0
-                && first_address < streams[insert_index - 1].next_block.first().unwrap().address
-            {
+            while insert_index > 0 {
+                let cmp_addr = streams[insert_index - 1]
+                    .next_block
+                    .first()
+                    .map(|ins| ins.address)
+                    .unwrap_or(u64::MAX);
+                if cmp_addr <= first_address {
+                    break;
+                }
                 insert_index -= 1;
             }
             streams.insert(insert_index, stream);
+            break;
         }
     }
 
@@ -161,7 +177,7 @@ fn dissasm_fast(
 ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
 use crossbeam_channel::TryRecvError;
     
-    const STEP:u64 = 1024 * 1024;
+    const STEP:u64 = 16;//1024 * 1024;
 
 //1. find reasonble start points
     let mut diffs = Vec::<(u64,u64)>::new();
@@ -172,7 +188,7 @@ use crossbeam_channel::TryRecvError;
     diffs.push((base_address, 0));
 
     while cur_addr < end_addr {
-        let next_probe = cur_addr + STEP;
+        let next_probe = cur_addr+1;// + STEP;
         let Some(next_start) = get_past_valid(ctx, next_probe, end_addr)? else {
             break;
         };
