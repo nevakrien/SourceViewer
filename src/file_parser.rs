@@ -201,6 +201,24 @@ use crossbeam_channel::TryRecvError;
     //we allways end on last adress
     diffs.last_mut().unwrap().1=end_addr;
 
+    // eprintln!("diffs {diffs:#?}");
+    eprintln!("==== Diffs ({}) ====", diffs.len());
+for (i, (start, end)) in diffs.iter().enumerate() {
+    let len = end.saturating_sub(*start);
+    let warn = if len == 0 {
+        "🚫 empty"
+    } else if len < 0x10 {
+        "⚠️ tiny"
+    } else {
+        ""
+    };
+    eprintln!(
+        "[{i:02}]  {start:#010x} .. {end:#010x}  (len={len:#06x}) {warn}",
+    );
+}
+eprintln!("=====================");
+
+
     //bail if its too small
     if diffs.len()<=1 {
         let cs = create_capstone(&arch)?;
