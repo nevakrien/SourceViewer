@@ -1,3 +1,4 @@
+// 
 use crate::args::FileSelection;
 use crate::program_context::find_func_name;
 use crate::program_context::CodeRegistry;
@@ -34,7 +35,8 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
     println!("visiting file {:?}", &*obj_file);
     code_files
         .visit_machine_file(obj_file.clone())?
-        .get_lines_map()?;
+        // .get_lines_map()?;
+        ;
 
     // let mut terminal = create_terminal()?;
     // let _cleanup = TerminalCleanup;
@@ -274,7 +276,8 @@ pub fn view_source_command(
         let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
         code_files
             .visit_machine_file(obj_file.clone())?
-            .get_lines_map()?;
+            // .get_lines_map()?;
+            ;
 
         let file_path = match &selections[0] {
             FileSelection::Index(i) => {

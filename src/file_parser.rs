@@ -14,42 +14,32 @@ use capstone::prelude::*;
 use gimli::RunTimeEndian;
 use gimli::{read::Dwarf, EndianSlice, SectionId};
 use std::error::Error;
-// pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
-// pub type FileMap = HashMap<Arc<Path>,LineMap>;
-#[derive(Debug, Default)]
-pub struct LineMap {
-    inner: BTreeMap<u32, Vec<InstructionDetail>>,
-    extra: Vec<InstructionDetail>,
-}
 
-impl LineMap {
-    #[inline(always)]
-    pub fn get(&self, id: &u32) -> Option<&Vec<InstructionDetail>> {
-        self.inner.get(id)
-    }
+// #[derive(Debug, Default)]
+// pub struct LineMap {
+//     inner: BTreeMap<u32, Vec<InstructionDetail>>,
+//     extra: Vec<InstructionDetail>,
+// }
 
-    #[inline(always)]
-    pub fn iter_maped(&'_ self) -> btree_map::Iter<'_, u32, Vec<InstructionDetail>> {
-        self.inner.iter()
-    }
-}
+// impl LineMap {
+//     #[inline(always)]
+//     pub fn iter_maped(&'_ self) -> btree_map::Iter<'_, u32, Vec<InstructionDetail>> {
+//         self.inner.iter()
+//     }
+// }
 
-#[derive(Debug, Default)]
-pub struct FileMap {
-    inner: HashMap<Arc<Path>, LineMap>,
-    extra: Vec<InstructionDetail>,
-}
+// #[derive(Debug, Default)]
+// pub struct FileMap {
+//     inner: HashMap<Arc<Path>, LineMap>,
+//     extra: Vec<InstructionDetail>,
+// }
 
-impl FileMap {
-    #[inline(always)]
-    pub fn get(&self, id: &Arc<Path>) -> Option<&LineMap> {
-        self.inner.get(id)
-    }
-
-    // fn entry(&mut self,id:Arc<Path>) -> hash_map::Entry<'_,Arc<Path>,LineMap> {
-    //     self.inner.entry(id)
-    // }
-}
+// impl FileMap {
+//     #[inline(always)]
+//     pub fn get(&self, id: &Arc<Path>) -> Option<&LineMap> {
+//         self.inner.get(id)
+//     }
+// }
 
 type Endian<'a> = EndianSlice<'a, RunTimeEndian>;
 
@@ -59,7 +49,7 @@ pub struct MachineFile<'a> {
     pub sections: Box<[Section<'a>]>,
     dwarf: OnceCell<Arc<Dwarf<Endian<'a>>>>,
     addr2line: OnceCell<Arc<Context<Endian<'a>>>>,
-    file_lines: OnceCell<Arc<FileMap>>, //line -> instruction>
+    // file_lines: OnceCell<Arc<FileMap>>, //line -> instruction>
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -87,11 +77,11 @@ pub struct CodeSection<'a> {
 
 // type Res =  Result<(),Box<dyn Error>>;
 
-fn dissasm(
+pub fn dissasm(
     cs: &Capstone,
     data: &[u8],
     address: u64,
-) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+) -> Result<Vec<InstructionDetail>, Box<dyn Error>> {
     let disasm = cs.disasm_all(data, address)?;
     let mut instructions = Vec::new();
     for (serial_number, insn) in disasm.iter().enumerate() {
@@ -103,7 +93,7 @@ fn dissasm(
             size: insn.len(),
         });
     }
-    Ok(instructions.into())
+    Ok(instructions)
 }
 
 impl CodeSection<'_> {
@@ -114,7 +104,7 @@ impl CodeSection<'_> {
         self.asm
             .get_or_try_init(|| {
                 let cs = create_capstone(&arch)?;
-                dissasm(&cs, self.data, self.address)
+                dissasm(&cs, self.data, self.address).map(|x|x.into())
             })
             .cloned()
     }
@@ -124,7 +114,7 @@ impl CodeSection<'_> {
         cs: &Capstone,
     ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
         self.asm
-            .get_or_try_init(|| dissasm(&cs, self.data, self.address))
+            .get_or_try_init(|| dissasm(&cs, self.data, self.address).map(|x|x.into()))
             .cloned()
     }
 }
@@ -147,59 +137,58 @@ pub struct InstructionDetail {
 }
 
 impl<'a> MachineFile<'a> {
-    //TODO make this not mut
-    pub fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
-        self.file_lines
-            .get_or_try_init(|| {
-                let context = self.get_addr2line()?;
+    //  fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
+    //     self.file_lines
+    //         .get_or_try_init(|| {
+    //             let context = self.get_addr2line()?;
 
-                // let mut ans = Arc::new(HashMap::new());
-                let mut ans = Arc::new(FileMap::default());
-                let handle = Arc::get_mut(&mut ans).unwrap();
+    //             // let mut ans = Arc::new(HashMap::new());
+    //             let mut ans = Arc::new(FileMap::default());
+    //             let handle = Arc::get_mut(&mut ans).unwrap();
 
-                for code_section in self.sections.iter().filter_map(|item| {
-                    if let Section::Code(c) = item {
-                        Some(c)
-                    } else {
-                        None
-                    }
-                }) {
-                    for instruction in code_section.get_asm(self.obj.architecture())?.iter() {
-                        if let Ok(Some(loc)) = context.find_location(instruction.address) {
-                            match (loc.file, loc.line) {
-                                (Some(file_name), Some(line)) => {
-                                    let file = Path::new(file_name).into();
+    //             for code_section in self.sections.iter().filter_map(|item| {
+    //                 if let Section::Code(c) = item {
+    //                     Some(c)
+    //                 } else {
+    //                     None
+    //                 }
+    //             }) {
+    //                 for instruction in code_section.get_asm(self.obj.architecture())?.iter() {
+    //                     if let Ok(Some(loc)) = context.find_location(instruction.address) {
+    //                         match (loc.file, loc.line) {
+    //                             (Some(file_name), Some(line)) => {
+    //                                 let file = Path::new(file_name).into();
 
-                                    handle
-                                        .inner
-                                        .entry(file)
-                                        .or_default()
-                                        .inner
-                                        .entry(line)
-                                        .or_default()
-                                        .push(instruction.clone());
-                                }
-                                (Some(file_name), None) => {
-                                    let file = Path::new(file_name).into();
+    //                                 handle
+    //                                     .inner
+    //                                     .entry(file)
+    //                                     .or_default()
+    //                                     .inner
+    //                                     .entry(line)
+    //                                     .or_default()
+    //                                     .push(instruction.clone());
+    //                             }
+    //                             (Some(file_name), None) => {
+    //                                 let file = Path::new(file_name).into();
 
-                                    handle
-                                        .inner
-                                        .entry(file)
-                                        .or_default()
-                                        .extra
-                                        .push(instruction.clone());
-                                }
-                                (None, _) => todo!(),
-                            }
-                        } else {
-                            handle.extra.push(instruction.clone())
-                        }
-                    }
-                }
-                Ok(ans)
-            })
-            .cloned()
-    }
+    //                                 handle
+    //                                     .inner
+    //                                     .entry(file)
+    //                                     .or_default()
+    //                                     .extra
+    //                                     .push(instruction.clone());
+    //                             }
+    //                             (None, _) => todo!(),
+    //                         }
+    //                     } else {
+    //                         handle.extra.push(instruction.clone())
+    //                     }
+    //                 }
+    //             }
+    //             Ok(ans)
+    //         })
+    //         .cloned()
+    // }
 
     fn get_gimli_section(&self, section: SectionId) -> &'a [u8] {
         self.obj
@@ -263,7 +252,7 @@ impl<'a> MachineFile<'a> {
             sections: parsed_sections.into(),
             dwarf: OnceCell::new(),
             addr2line: OnceCell::new(),
-            file_lines:OnceCell::new(),
+            // file_lines:OnceCell::new(),
         };
 
         if parse_asm {
@@ -308,7 +297,7 @@ fn get_first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u6
     }
 }
 
-fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Error>> {
+pub fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Error>> {
     let mut cs = match arch {
         object::Architecture::X86_64 => Capstone::new()
             .x86()

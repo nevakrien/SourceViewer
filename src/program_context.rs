@@ -1,3 +1,5 @@
+use crate::file_parser::dissasm;
+use crate::file_parser::create_capstone;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
 use crate::file_parser::InstructionDetail;
@@ -195,7 +197,7 @@ impl CodeFile {
         self.asm.get(line)?.get(&path).map(|x| x.as_slice()) //.unwrap_or(&[])
     }
 
-    pub fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>) {
+    pub fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>)  {
         for (obj_path, res) in asm.map.iter_mut() {
             let machine_file = match res {
                 Ok(x) => x,
@@ -205,27 +207,84 @@ impl CodeFile {
                     continue;
                 }
             };
-            let map = match machine_file.get_lines_map() {
+
+            // let map = match machine_file.get_lines_map() {
+            //     Ok(x) => x,
+            //     Err(e) => {
+            //         let error = StackedError::new(e, "while making context");
+            //         self.errors.push((error, None));
+            //         continue;
+            //     }
+            // };
+
+            // if let Some(line_map) = map.get(&path) {
+            //     for (line, v) in line_map.iter_maped() {
+            //         let spot = self
+            //             .asm
+            //             .entry(*line)
+            //             .or_insert(HashMap::new())
+            //             .entry(obj_path.clone())
+            //             .or_insert(vec![]);
+
+            //         spot.reserve(v.len());
+            //         spot.extend_from_slice(v)
+            //     }
+            // }
+            let ctx = match machine_file.get_addr2line() {
                 Ok(x) => x,
                 Err(e) => {
-                    let error = StackedError::new(e, "while making context");
+                    let error = StackedError::new(e, "while getting dwarf info");
+                    self.errors.push((error, None));
+                    continue;
+                }
+            };
+            let cs = match create_capstone(&machine_file.obj.architecture()) {
+                Ok(x) => x,
+                Err(e) => {
+                    let error = StackedError::new(e, "while making dissasmbler");
                     self.errors.push((error, None));
                     continue;
                 }
             };
 
-            if let Some(line_map) = map.get(&path) {
-                for (line, v) in line_map.iter_maped() {
-                    let spot = self
+            for sec in machine_file.sections.iter(){
+                let Section::Code(code) = sec else {continue;};
+
+                let low = code.address;
+                let high = low+code.data.len() as u64 -1;
+                let iter = match ctx.find_location_range(low,high){
+                    Ok(x) => x,
+                    Err(e) => {
+                        let error = StackedError::new(Box::new(e), "while reading dwarf info");
+                        self.errors.push((error, None));
+                        continue;
+                    }
+                };
+                for (start,size,loc) in iter{
+
+                    let Some(line) = loc.line else {continue;};
+                    //TODO we should probably use the file given here not what we have
+
+                    let data = &code.data[(start-low) as usize..][..size as usize];
+
+                    let insts = match dissasm(&cs,data,low){
+                        Ok(x) => x,
+                        Err(e) => {
+                            let error = StackedError::new(e, "while dissasmbling");
+                            self.errors.push((error, None));
+                            continue;
+                        }
+                    };
+
+                    self
                         .asm
-                        .entry(*line)
+                        .entry(line)
                         .or_insert(HashMap::new())
                         .entry(obj_path.clone())
-                        .or_insert(vec![]);
-
-                    spot.reserve(v.len());
-                    spot.extend_from_slice(v)
+                        .or_insert(vec![])
+                        .extend(insts);
                 }
+
             }
         }
     }
