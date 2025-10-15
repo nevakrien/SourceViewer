@@ -195,40 +195,78 @@ impl CodeFile {
         self.asm.get(line)?.get(&path).map(|x| x.as_slice()) //.unwrap_or(&[])
     }
 
+    // pub fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>) {
+    //     for (obj_path, res) in asm.map.iter_mut() {
+    //         let machine_file = match res {
+    //             Ok(x) => x,
+    //             Err(e) => {
+    //                 let error = StackedError::from_wraped(e.clone(), "while getting machine");
+    //                 self.errors.push((error, None));
+    //                 continue;
+    //             }
+    //         };
+    //         let map = match machine_file.get_lines_map() {
+    //             Ok(x) => x,
+    //             Err(e) => {
+    //                 let error = StackedError::new(e, "while making context");
+    //                 self.errors.push((error, None));
+    //                 continue;
+    //             }
+    //         };
+
+    //         if let Some(line_map) = map.get(&path) {
+    //             for (line, v) in line_map.iter_maped() {
+    //                 let spot = self
+    //                     .asm
+    //                     .entry(*line)
+    //                     .or_insert(HashMap::new())
+    //                     .entry(obj_path.clone())
+    //                     .or_insert(vec![]);
+
+    //                 spot.reserve(v.len());
+    //                 spot.extend_from_slice(v)
+    //             }
+    //         }
+    //     }
+    // }
+
     pub fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>) {
+        // Helper closure that runs a fallible block, catches any Err,
+        // pushes to self.errors, and continues the outer loop.
+        macro_rules! try_in_loop {
+            ($expr:expr, $msg:expr) => {
+                match $expr {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let err = StackedError::new(e, $msg);
+                        self.errors.push((err, None));
+                        continue;
+                    }
+                }
+            };
+        }
+
         for (obj_path, res) in asm.map.iter_mut() {
-            let machine_file = match res {
-                Ok(x) => x,
-                Err(e) => {
-                    let error = StackedError::from_wraped(e.clone(), "while getting machine");
-                    self.errors.push((error, None));
-                    continue;
-                }
-            };
-            let map = match machine_file.get_lines_map() {
-                Ok(x) => x,
-                Err(e) => {
-                    let error = StackedError::new(e, "while making context");
-                    self.errors.push((error, None));
-                    continue;
-                }
-            };
+            // both can use normal `?` style thanks to the macro
+            let machine_file = try_in_loop!(res.as_ref().map_err(|e| e.clone().into()), "while getting machine");
+            let map = try_in_loop!(machine_file.get_lines_map(), "while making context");
 
             if let Some(line_map) = map.get(&path) {
                 for (line, v) in line_map.iter_maped() {
                     let spot = self
                         .asm
                         .entry(*line)
-                        .or_insert(HashMap::new())
+                        .or_insert_with(HashMap::new)
                         .entry(obj_path.clone())
-                        .or_insert(vec![]);
+                        .or_insert_with(Vec::new);
 
                     spot.reserve(v.len());
-                    spot.extend_from_slice(v)
+                    spot.extend_from_slice(v);
                 }
             }
         }
     }
+
 }
 
 pub struct CodeRegistry<'data, 'r> {

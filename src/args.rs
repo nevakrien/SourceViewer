@@ -198,12 +198,6 @@ pub enum Commands {
         #[command(flatten)]
         opts: MultiBinOpts,
     },
-
-    #[command(about = "used for dev")]
-    DumpParts {
-        #[command(flatten)]
-        opts: SingleBinOpts,
-    },
 }
 
 impl Commands {
@@ -214,7 +208,6 @@ impl Commands {
             | Commands::Lines { opts, .. }
             | Commands::ViewSources { opts }
             | Commands::DwarfDump { opts } => opts.color,
-            Commands::DumpParts { opts } => opts.color,
         }
     }
 }

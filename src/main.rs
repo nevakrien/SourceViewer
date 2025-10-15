@@ -2,7 +2,6 @@ use clap::Parser;
 use source_viewer::args::*;
 use source_viewer::errors::downcast_chain_ref;
 use source_viewer::errors::PrintError;
-use source_viewer::skiper::dump_parts;
 use source_viewer::subcommands::*;
 use std::env;
 use std::process::ExitCode;
@@ -40,7 +39,6 @@ fn main() -> ExitCode {
         Commands::ViewSources { opts } => view_sources_command(opts.bins),
         Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
 
-        Commands::DumpParts { opts } => dump_parts(&opts.bin),
     };
 
     ExitCode::from(match res {

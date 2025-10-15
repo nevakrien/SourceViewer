@@ -24,11 +24,6 @@ pub struct LineMap {
 
 impl LineMap {
     #[inline(always)]
-    pub fn get(&self, id: &u32) -> Option<&Vec<InstructionDetail>> {
-        self.inner.get(id)
-    }
-
-    #[inline(always)]
     pub fn iter_maped(&'_ self) -> btree_map::Iter<'_, u32, Vec<InstructionDetail>> {
         self.inner.iter()
     }
@@ -45,10 +40,6 @@ impl FileMap {
     pub fn get(&self, id: &Arc<Path>) -> Option<&LineMap> {
         self.inner.get(id)
     }
-
-    // fn entry(&mut self,id:Arc<Path>) -> hash_map::Entry<'_,Arc<Path>,LineMap> {
-    //     self.inner.entry(id)
-    // }
 }
 
 type Endian<'a> = EndianSlice<'a, RunTimeEndian>;
@@ -147,7 +138,6 @@ pub struct InstructionDetail {
 }
 
 impl<'a> MachineFile<'a> {
-    //TODO make this not mut
     pub fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
         self.file_lines
             .get_or_try_init(|| {
