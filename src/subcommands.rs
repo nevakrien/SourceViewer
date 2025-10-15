@@ -33,7 +33,7 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
 
     println!("visiting file {:?}", &*obj_file);
     code_files
-        .visit_machine_file(obj_file.clone())?
+        .visit_machine_file(obj_file.clone(),true)?
         .get_lines_map()?;
 
     // let mut terminal = create_terminal()?;
@@ -50,7 +50,7 @@ pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(
     // Iterate over each file path and process it
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
-        let machine_file = registry.get_machine(file_path.into())?;
+        let machine_file = registry.get_machine(file_path.into(),true)?;
         let arch = machine_file.obj.architecture();
         let ctx = machine_file.get_addr2line()?;
         let source_map = map_instructions_to_source(machine_file)?;
@@ -59,7 +59,7 @@ pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(
             if let Section::Code(code_section) = section {
                 println!("{}", section.name());
 
-                for (_i, ins) in code_section.get_asm(arch)?.iter().enumerate() {
+                for ins in code_section.get_asm(arch)?.iter() {
                     let (file, line) = match source_map.get(&ins.address) {
                         Some((f, l)) => (f.to_string(), l.to_string()),
                         None => {
@@ -239,7 +239,7 @@ pub fn view_source_command(
     //     return Err("Can only walk in 1 file at a time".into());
     // }
 
-    if walk && selections.len() == 0 {
+    if walk && selections.is_empty() {
         return Err("No walk selection provided".into());
     }
 
@@ -273,7 +273,7 @@ pub fn view_source_command(
         let mut registry = FileRegistry::new(&asm_arena);
         let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
         code_files
-            .visit_machine_file(obj_file.clone())?
+            .visit_machine_file(obj_file.clone(),true)?
             .get_lines_map()?;
 
         let file_path = match &selections[0] {

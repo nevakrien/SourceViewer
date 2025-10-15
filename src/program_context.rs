@@ -32,7 +32,7 @@ impl<'a> FileRegistry<'a> {
         }
     }
 
-    pub fn get_machine(&mut self, path: Arc<Path>) -> Result<&mut MachineFile<'a>, Box<dyn Error>> {
+    pub fn get_machine(&mut self, path: Arc<Path>,precompile:bool) -> Result<&mut MachineFile<'a>, Box<dyn Error>> {
         //code looks so ugly because we cant pull into a side function or the borrow checker will freak out
         // println!("geting data for {}",path.to_string_lossy());
 
@@ -52,7 +52,7 @@ impl<'a> FileRegistry<'a> {
                 };
                 let b = self.files_arena.alloc(buffer);
                 entry
-                    .insert(MachineFile::parse(b, false).map_err(WrapedError::new))
+                    .insert(MachineFile::parse(b, precompile).map_err(WrapedError::new))
                     .as_mut()
                     .map_err(|e| e.clone().into())
             }
@@ -132,7 +132,7 @@ pub fn find_func_name<'a, 'b: 'a>(
                 let dwo = dwo_path.and_then(
                     |full_path| {
                         registry
-                            .get_machine(full_path.into())
+                            .get_machine(full_path.into(),false)
                             .ok()
                             .and_then(|m| m.load_dwarf().ok())
                     }, // .map(Arc::new)
@@ -256,9 +256,9 @@ impl CodeFile {
                     let spot = self
                         .asm
                         .entry(*line)
-                        .or_insert_with(HashMap::new)
+                        .or_default()
                         .entry(obj_path.clone())
-                        .or_insert_with(Vec::new);
+                        .or_default();
 
                     spot.reserve(v.len());
                     spot.extend_from_slice(v);
@@ -330,8 +330,9 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
     pub fn visit_machine_file(
         &mut self,
         path: Arc<Path>,
+        precompile:bool,
     ) -> Result<&mut MachineFile<'data>, Box<dyn Error>> {
-        self.asm.get_machine(path)
+        self.asm.get_machine(path,precompile)
     }
 }
 

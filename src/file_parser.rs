@@ -1,3 +1,4 @@
+use crate::errors::StringError;
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
 use object::Architecture;
 use object::{Object, ObjectSection, SectionFlags};
@@ -97,6 +98,208 @@ fn dissasm(
     Ok(instructions.into())
 }
 
+use std::collections::LinkedList;
+
+fn merge_linked_lists(
+    lists: Vec<LinkedList<Vec<InstructionDetail>>>,
+) -> Vec<InstructionDetail> {
+
+    struct Stream {
+        next_block: Vec<InstructionDetail>,
+        remaining_blocks: std::collections::linked_list::IntoIter<Vec<InstructionDetail>>,
+    }
+
+    // Build initial streams
+    let mut streams: Vec<Stream> = lists
+        .into_iter()
+        .filter_map(|list| {
+            let mut iterator = list.into_iter();
+            iterator.next().map(|first_block| Stream {
+                next_block: first_block,
+                remaining_blocks: iterator,
+            })
+        })
+        .collect();
+
+    // Sort ascending by first address of the next_block
+    streams.sort_by_key(|stream| stream.next_block.first().unwrap().address);
+
+    let mut merged: Vec<InstructionDetail> = Vec::new();
+
+    while let Some(mut stream) = streams.pop() {
+        // Pop the smallest (streams is sorted ascending, so back is smallest)
+        merged.extend(stream.next_block);
+
+        // Advance this stream
+        if let Some(next_block) = stream.remaining_blocks.next() {
+            let first_address = next_block.first().unwrap().address;
+            stream.next_block = next_block;
+
+            // Manual insertion (bubble-up) to keep streams sorted ascending by address
+            let mut insert_index = streams.len();
+            while insert_index > 0
+                && first_address < streams[insert_index - 1].next_block.first().unwrap().address
+            {
+                insert_index -= 1;
+            }
+            streams.insert(insert_index, stream);
+        }
+    }
+
+    for (k,ins) in merged.iter_mut().enumerate(){
+        ins.serial_number=k;
+    }
+
+    merged
+}
+
+fn dissasm_fast(
+    arch: &Architecture,
+    ctx:&Context<Endian<'_>>,
+    data: &[u8],
+    base_address: u64,
+) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+use crossbeam_channel::TryRecvError;
+    
+    const STEP:u64 = 1024 * 1024;
+
+//1. find reasonble start points
+    let mut diffs = Vec::<(u64,u64)>::new();
+    let mut cur_addr = base_address;
+    let end_addr = base_address+data.len() as u64;
+    
+    while cur_addr < end_addr {
+        // Find the next valid instruction start *at or after* cur_addr
+        let Some(start) = get_past_valid(ctx, cur_addr, end_addr)? else { break };
+
+        // Close previous region if needed
+        if let Some(last) = diffs.last_mut() {
+            if last.1 == 0 {
+                last.1 = start;
+            }
+        }
+
+        // Find where the *next* valid region begins, to mark the end of this one
+        let next_search_start = start + STEP;
+        let Some(next_start) = get_past_valid(ctx, next_search_start, end_addr)? else {
+            diffs.push((start, end_addr));
+            break;
+        };
+
+        // Store interval
+        diffs.push((start, next_start));
+
+        // Move forward
+        cur_addr = next_start;
+    }
+
+
+    //bail if its too small
+    if diffs.len()<=1 {
+        let cs = create_capstone(&arch)?;
+        return dissasm(&cs,data,base_address);
+    }
+
+//2. run super fast on all
+    use crossbeam_channel::unbounded;
+    use std::thread;
+
+    let num_threads = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+
+
+    type Res = Result<LinkedList<Vec<InstructionDetail>>, Box<str>>;
+    let (send_task,recive_task) = unbounded::<(u64,u64)>();//(num_threads*10);
+    let (send_result,recive_result) = unbounded::<Res>();//(num_threads*10);
+
+    
+let all_results=thread::scope(|scope| -> Result<Vec<LinkedList<Vec<InstructionDetail>>>,Box<dyn Error>>{
+    for _i in 0..num_threads {
+        let recive = recive_task.clone();
+        let send = send_result.clone();
+
+        macro_rules! try_in_thread {
+            ($expr:expr) => {
+                match $expr {
+                    Ok(x) => x,
+                    Err(e) => {
+                        // We can just send a String (or Box<str>) error message
+                        let _ = send.send(Err(Box::<str>::from(format!("{e}"))));
+                        return;
+                    }
+                }
+            };
+        }
+
+        scope.spawn(move || {
+            let cs = try_in_thread!(create_capstone(&arch).map_err(StringError::new));
+            let mut ans = LinkedList::new();
+
+            for (start, end) in recive {
+                let this_data = &data[(start-base_address) as usize..][..(end - start) as usize];
+                let disasm = try_in_thread!(cs.disasm_all(this_data, start));
+                let mut instructions = Vec::new();
+
+                for insn in disasm.iter() {
+                    instructions.push(InstructionDetail {
+                        serial_number: usize::MAX,
+                        address: insn.address(),
+                        mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
+                        op_str: insn.op_str().unwrap_or("unknown").into(),
+                        size: insn.len(),
+                    });
+                }
+
+                ans.push_back(instructions);
+            }
+
+            send.send(Ok(ans)).unwrap();
+        });
+    }
+
+    drop(send_result);
+    drop(recive_task);
+
+    //2.5 now send the thing
+    let mut ans = Vec::new();
+
+    for task in diffs.into_iter(){
+        send_task.send(task)?;
+        //recive as we go so we dont deadlock on subtask panic
+        match recive_result.try_recv() {
+            Ok(Err(e)) => {
+                return Err(Box::new(StringError::new(format!("{e}"))));
+            }
+            Ok(Ok(x)) => {
+                ans.push(x);
+            }
+            Err(TryRecvError::Empty) => {
+                // fine, just continue sending
+            }
+            Err(TryRecvError::Disconnected) => {
+                return Err(Box::new(StringError::new("all worker threads disconnected early")));
+            }
+        }
+    }
+    drop(send_task);
+
+    for res in recive_result {
+        ans.push(res.map_err(|e|Box::new(StringError::new(format!("{e}"))))?);
+    }
+
+
+    Ok(ans)
+})?;
+
+if all_results.len()<num_threads{
+    return Err(Box::new(StringError::new("worker thread died unexpectadly")));
+}
+   
+Ok(merge_linked_lists(all_results).into())
+
+}
+
 impl CodeSection<'_> {
     pub fn get_existing_asm(&self) -> Arc<[InstructionDetail]> {
         self.asm.get().unwrap().clone()
@@ -110,12 +313,22 @@ impl CodeSection<'_> {
             .cloned()
     }
 
-    pub fn get_asm_capstone(
+    fn get_asm_capstone(
         &self,
         cs: &Capstone,
     ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
         self.asm
-            .get_or_try_init(|| dissasm(&cs, self.data, self.address))
+            .get_or_try_init(|| dissasm(cs, self.data, self.address))
+            .cloned()
+    }
+
+    pub fn get_asm_fast(
+        &self,
+        arch: &Architecture,
+        ctx:&Context<Endian<'_>>,
+    ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+        self.asm
+            .get_or_try_init(|| dissasm_fast(arch,ctx, self.data, self.address))
             .cloned()
     }
 }
@@ -260,13 +473,13 @@ impl<'a> MachineFile<'a> {
             let need_ctx = false;
 
             match (ans.get_addr2line(), need_ctx) {
-                (Ok(_ctx), _) => {
-                    slow_compile(&mut ans, &arch)?;
+                (Ok(ctx), _) => {
+                    fast_compile(&mut ans,&ctx, &arch)?;
                 }
                 (Err(e), true) => return Err(e),
                 (Err(_e), false) => {
                     //slow fallback
-                    // eprintln!("⚠️ failed to retrive dwarf info, runing slow single thread disassembler");
+                    eprintln!("⚠️ failed to retrive dwarf info, runing slow single thread disassembler");
                     slow_compile(&mut ans, &arch)?;
                 }
             }
@@ -277,28 +490,36 @@ impl<'a> MachineFile<'a> {
 
 #[inline(always)]
 fn slow_compile(ans: &mut MachineFile, arch: &Architecture) -> Result<(), Box<dyn Error>> {
-    let cs = create_capstone(&arch)?;
+    let cs = create_capstone(arch)?;
     for s in ans.sections.iter_mut() {
-        match s {
-            Section::Code(c) => {
-                c.get_asm_capstone(&cs)?;
-            }
-            _ => {}
+        if let Section::Code(c) = s {
+            c.get_asm_capstone(&cs)?;
         }
     }
     Ok(())
 }
 
-fn get_first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
+#[inline(always)]
+fn fast_compile(ans: &mut MachineFile,ctx:&Context<Endian<'_>>, arch: &Architecture) -> Result<(), Box<dyn Error>> {
+    for s in ans.sections.iter_mut() {
+        if let Section::Code(c) = s {
+            c.get_asm_fast(arch,ctx)?;
+        }
+    }
+    Ok(())
+}
+
+
+fn get_past_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
     let mut iter = ctx.find_location_range(start,end)?;
-    if let Some((start,_,_)) = iter.next(){
-        Ok(Some(start))
+    if let Some((start,size,_)) = iter.next(){
+        Ok(Some(start+size))
     }else{
         Ok(None)
     }
 }
 
-fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Error>> {
+fn create_capstone(arch: &object::Architecture) -> Result<Capstone, capstone::Error> {
     let mut cs = match arch {
         object::Architecture::X86_64 => Capstone::new()
             .x86()
@@ -354,7 +575,7 @@ fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Erro
             .build()?,
 
         // Add more architectures as needed
-        _ => return Err("Unsupported architecture".into()),
+        _ => return Err(capstone::Error::CustomError("Unsupported architecture")),
     };
     cs.set_skipdata(true)?;
     Ok(cs)

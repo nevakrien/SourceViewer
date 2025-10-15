@@ -106,3 +106,17 @@ macro_rules! println {
             .map_err(|e| Box::new($crate::errors::PrintError(e)) as Box<dyn std::error::Error>)?;
     }};
 }
+
+#[derive(Debug)]
+pub struct StringError(Box<str>);
+impl StringError{
+    pub fn new<T:std::fmt::Display>(t:T)->Self{
+        Self(Box::from(format!("{t}")))
+    }
+}
+impl std::fmt::Display for StringError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl std::error::Error for StringError {}
