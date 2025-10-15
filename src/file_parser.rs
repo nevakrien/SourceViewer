@@ -168,31 +168,22 @@ use crossbeam_channel::TryRecvError;
     let mut cur_addr = base_address;
     let end_addr = base_address+data.len() as u64;
     
+    // Always start the first region at the base
+    diffs.push((base_address, 0));
+
     while cur_addr < end_addr {
-        // Find the next valid instruction start *at or after* cur_addr
-        let Some(start) = get_past_valid(ctx, cur_addr, end_addr)? else { break };
-
-        // Close previous region if needed
-        if let Some(last) = diffs.last_mut() {
-            if last.1 == 0 {
-                last.1 = start;
-            }
-        }
-
-        // Find where the *next* valid region begins, to mark the end of this one
-        let next_search_start = start + STEP;
-        let Some(next_start) = get_past_valid(ctx, next_search_start, end_addr)? else {
-            diffs.push((start, end_addr));
+        let next_probe = cur_addr + STEP;
+        let Some(next_start) = get_past_valid(ctx, next_probe, end_addr)? else {
             break;
         };
 
-        // Store interval
-        diffs.push((start, next_start));
-
-        // Move forward
+        diffs.last_mut().unwrap().1 = next_start;
+        diffs.push((next_start, 0));
         cur_addr = next_start;
     }
 
+    //we allways end on last adress
+    diffs.last_mut().unwrap().1=end_addr;
 
     //bail if its too small
     if diffs.len()<=1 {
