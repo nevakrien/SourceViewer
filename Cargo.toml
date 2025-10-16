@@ -19,6 +19,7 @@ capstone = "0.13.0"
 clap = {version ="4.5.21", features = ["derive"]}
 colored = "2.1.0"
 crossterm = "0.29"
+fallible-iterator = "0.3.0"
 gimli = { version = "0.32.3", features = ["read"] }
 object = "0.37.3"
 once_cell = "1.21.3"

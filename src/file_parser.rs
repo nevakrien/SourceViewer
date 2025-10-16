@@ -147,15 +147,12 @@ impl<'a> MachineFile<'a> {
                 let mut ans = Arc::new(FileMap::default());
                 let handle = Arc::get_mut(&mut ans).unwrap();
 
-                for code_section in self.sections.iter().filter_map(|item| {
-                    if let Section::Code(c) = item {
-                        Some(c)
-                    } else {
-                        None
-                    }
-                }) {
+                for section in self.sections.iter() {
+                    let Section::Code(code_section) = section else{
+                        continue;
+                    };
                     for instruction in code_section.get_asm(self.obj.architecture())?.iter() {
-                        if let Ok(Some(loc)) = context.find_location(instruction.address) {
+                        if let Some(loc) = context.find_location(instruction.address)? {
                             match (loc.file, loc.line) {
                                 (Some(file_name), Some(line)) => {
                                     let file = Path::new(file_name).into();
@@ -179,7 +176,7 @@ impl<'a> MachineFile<'a> {
                                         .extra
                                         .push(instruction.clone());
                                 }
-                                (None, _) => todo!(),
+                                (None, _) => handle.extra.push(instruction.clone()),
                             }
                         } else {
                             handle.extra.push(instruction.clone())

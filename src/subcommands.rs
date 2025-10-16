@@ -1,3 +1,4 @@
+use fallible_iterator::FallibleIterator;
 use crate::args::FileSelection;
 use crate::program_context::find_func_name;
 use crate::program_context::CodeRegistry;
@@ -11,9 +12,7 @@ use std::time::Instant;
 
 use crate::file_parser::MachineFile;
 use crate::file_parser::Section;
-use crate::program_context::map_instructions_to_source;
 use crate::program_context::resolve_func_name;
-use crate::program_context::AddressFileMapping;
 use crate::program_context::FileRegistry;
 // use crate::program_context::format_inst_debug;
 use colored::*;
@@ -24,6 +23,8 @@ use std::path::PathBuf;
 use typed_arena::Arena;
 
 use crate::println;
+
+// use crate::program_context::AddressFileMapping;
 
 pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error>> {
     let asm_arena = Arena::new();
@@ -53,15 +54,21 @@ pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(
         let machine_file = registry.get_machine(file_path.into())?;
         let arch = machine_file.obj.architecture();
         let ctx = machine_file.get_addr2line()?;
-        let source_map = map_instructions_to_source(machine_file)?;
 
         for section in &machine_file.sections.clone() {
             if let Section::Code(code_section) = section {
                 println!("{}", section.name());
 
                 for (_i, ins) in code_section.get_asm(arch)?.iter().enumerate() {
-                    let (file, line) = match source_map.get(&ins.address) {
-                        Some((f, l)) => (f.to_string(), l.to_string()),
+                    let (file, line) = match ctx.find_location(ins.address)? {
+                        Some(loc) => {
+                            if ignore_unknown && (loc.file.is_none()||loc.line.is_none()){
+                                continue;
+                            }
+                            let file = loc.file.unwrap_or("<unknown>").to_string();
+                            let line = loc.line.map(|i| {i.to_string()}).unwrap_or("<unknown>".to_string());
+                            (file, line)
+                        },
                         None => {
                             if ignore_unknown {
                                 continue;
@@ -194,27 +201,29 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
     Ok(())
 }
 
-pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
-    // Initialize a basic editor interface
-    // TODO: Use a library like `crossterm` to set up the interface
-    // For now, placeholder logic to prompt file selection
-    let mut filemaps: Vec<AddressFileMapping> = Vec::new();
-    let mut source_files: HashSet<String> = HashSet::new();
 
-    // Load files into registry
+pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+    let mut source_files: HashSet<Box<str>> = HashSet::new();
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
-        // registry.add_file(file_path.clone())?;
-
         let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer, true)?;
+        let machine_file = MachineFile::parse(&buffer, true)?;
+        let ctx = machine_file.get_addr2line()?;
+        for section in machine_file.sections.iter(){
+            let Section::Code(code) = section else{
+                continue;
+            };
 
-        let map = map_instructions_to_source(&mut machine_file)?;
-        for (s, _) in map.values() {
-            source_files.insert(s.to_string());
+            let mut locs = ctx.find_location_range(code.address,code.address+code.data.len() as u64)?;
+            while let Some((_,_,loc)) =FallibleIterator::next(&mut locs)?{
+                if let Some(file) = loc.file{
+                    source_files.insert(file.into());
+                }
+            }
+
         }
-        filemaps.push(map);
     }
+
 
     let mut source_files: Vec<_> = source_files.into_iter().collect();
     source_files.sort();
@@ -245,26 +254,27 @@ pub fn view_source_command(
 
     // Load and parse the binary
     let buffer = fs::read(file_path)?;
-    let mut machine_file = MachineFile::parse(&buffer, true)?;
-    let map = map_instructions_to_source(&mut machine_file)?;
+    let machine_file = MachineFile::parse(&buffer, true)?;
+    let ctx = machine_file.get_addr2line()?;
 
     // Populate a unique list of source files in the order they appear
-    let mut source_files: Vec<String> = Vec::new();
-    let mut source_files_map: HashMap<String, usize> = HashMap::new();
+    let mut source_files_set: HashSet<PathBuf> = HashSet::new();
+    for section in machine_file.sections.iter(){
+        let Section::Code(code) = section else{
+            continue;
+        };
 
-    for (source, _) in map.values() {
-        // Add to source files if not already added
-        if !source_files_map.contains_key(source) {
-            let index = source_files.len();
-            source_files.push(source.to_string());
-            source_files_map.insert(source.to_string(), index);
+        let mut locs = ctx.find_location_range(code.address,code.address+code.data.len() as u64)?;
+        while let Some((_,_,loc)) =FallibleIterator::next(&mut locs)?{
+            if let Some(file) = loc.file{
+                source_files_set.insert(file.into());
+            }
         }
+
     }
 
+    let mut source_files: Vec<&Path> = source_files_set.iter().map(|p| p.as_path()).collect();
     source_files.sort();
-    for (i, t) in source_files.iter().enumerate() {
-        *source_files_map.get_mut(t).unwrap() = i;
-    }
 
     if walk {
         let obj_file: Arc<Path> = file_path.into();
@@ -279,16 +289,15 @@ pub fn view_source_command(
         let file_path = match &selections[0] {
             FileSelection::Index(i) => {
                 if let Some(file) = source_files.get(*i) {
-                    file
+                    *file
                 } else {
                     println!("{}", format!("Index {} is out of bounds", i).red());
                     return Ok(());
                 }
             }
             FileSelection::Path(path) => {
-                let path_str = path.to_string_lossy().to_string();
-                if let Some(&index) = source_files_map.get(&path_str) {
-                    &source_files[index]
+                if let Some(ans) = source_files_set.get(path) {
+                    ans
                 } else {
                     println!(
                         "{}",
@@ -298,7 +307,7 @@ pub fn view_source_command(
                 }
             }
         };
-        let file_path = Path::new(file_path);
+        let file_path = Path::new(file_path.into());
         let parent = file_path
             .parent()
             .ok_or("No parent dir to path")?
@@ -341,7 +350,7 @@ pub fn view_source_command(
     }
 
     // Collect files to display based on the selections or `-a` flag
-    let mut files_to_display: Vec<&String> = Vec::new();
+    let mut files_to_display: Vec<&Path> = Vec::new();
 
     if look_all {
         // Add all files if `-a` is set
@@ -358,9 +367,8 @@ pub fn view_source_command(
                     }
                 }
                 FileSelection::Path(path) => {
-                    let path_str = path.to_string_lossy().to_string();
-                    if let Some(&index) = source_files_map.get(&path_str) {
-                        files_to_display.push(&source_files[index]);
+                    if let Some(file) = source_files_set.get(&path) {
+                        files_to_display.push(file);
                     } else {
                         println!(
                             "{}",
@@ -381,8 +389,7 @@ pub fn view_source_command(
 }
 
 // Helper function to display the contents of a file with line numbers
-fn display_file_contents(file_name: &str) -> Result<(), Box<dyn Error>> {
-    let file_path = Path::new(file_name);
+fn display_file_contents(file_path: &Path) -> Result<(), Box<dyn Error>> {
     match fs::canonicalize(file_path) {
         Ok(file) => match fs::read_to_string(&file) {
             Ok(source_text) => {
@@ -396,7 +403,7 @@ fn display_file_contents(file_name: &str) -> Result<(), Box<dyn Error>> {
             }
         },
         Err(_) => {
-            println!("{}", format!("{:?} does not exist", file_name).red());
+            println!("{}", format!("{:?} does not exist", file_path).red());
         }
     }
     Ok(())

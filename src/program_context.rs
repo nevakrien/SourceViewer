@@ -61,32 +61,32 @@ impl<'a> FileRegistry<'a> {
     }
 }
 
-pub type AddressFileMapping = HashMap<u64, (String, u32)>; // address -> (file, line)
+// pub type AddressFileMapping = HashMap<u64, (String, u32)>; // address -> (file, line)
 
-pub fn map_instructions_to_source(
-    machine_file: &MachineFile,
-) -> Result<AddressFileMapping, Box<dyn Error>> {
-    let mut mapping = AddressFileMapping::new();
+// pub fn map_instructions_to_source(
+//     machine_file: &MachineFile,
+// ) -> Result<AddressFileMapping, Box<dyn Error>> {
+//     let mut mapping = AddressFileMapping::new();
 
-    // Create addr2line context from DWARF data
-    let ctx = machine_file.get_addr2line()?;
-    let arch = machine_file.obj.architecture();
+//     // Create addr2line context from DWARF data
+//     let ctx = machine_file.get_addr2line()?;
+//     let arch = machine_file.obj.architecture();
 
-    // Iterate through each code section and map addresses to source
-    for section in &machine_file.sections {
-        if let Section::Code(code_section) = section {
-            for instruction in code_section.get_asm(arch)?.iter() {
-                if let Ok(Some(loc)) = ctx.find_location(instruction.address) {
-                    let file = loc.file.unwrap_or("<unknown>").to_string();
-                    let line = loc.line.unwrap_or(0);
-                    mapping.insert(instruction.address, (file, line));
-                }
-            }
-        }
-    }
+//     // Iterate through each code section and map addresses to source
+//     for section in &machine_file.sections {
+//         if let Section::Code(code_section) = section {
+//             for instruction in code_section.get_asm(arch)?.iter() {
+//                 if let Ok(Some(loc)) = ctx.find_location(instruction.address) {
+//                     let file = loc.file.unwrap_or("<unknown>").to_string();
+//                     let line = loc.line.unwrap_or(0);
+//                     mapping.insert(instruction.address, (file, line));
+//                 }
+//             }
+//         }
+//     }
 
-    Ok(mapping)
-}
+//     Ok(mapping)
+// }
 
 pub type DebugContext<'a> = addr2line::Context<EndianSlice<'a, RunTimeEndian>>;
 
