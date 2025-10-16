@@ -85,9 +85,9 @@ fn dissasm(
 ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
     let disasm = cs.disasm_all(data, address)?;
     let mut instructions = Vec::new();
-    for (serial_number, insn) in disasm.iter().enumerate() {
+    for (_serial_number, insn) in disasm.iter().enumerate() {
         instructions.push(InstructionDetail {
-            serial_number,
+            // serial_number,
             address: insn.address(),
             mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
             op_str: insn.op_str().unwrap_or("unknown").into(),
@@ -129,12 +129,18 @@ pub struct InfoSection<'a> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstructionDetail {
-    pub serial_number: usize,
+    // pub serial_number: usize,
 
     pub address: u64,
     pub mnemonic: Box<str>,
     pub op_str: Box<str>,
     pub size: usize,
+}
+
+impl InstructionDetail {
+    pub fn get_end(&self)->u64{
+        self.address+self.size as u64
+    }
 }
 
 impl<'a> MachineFile<'a> {

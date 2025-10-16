@@ -5,7 +5,6 @@ use crate::program_context::CodeRegistry;
 use crate::walk::FileResult;
 use crate::walk::GlobalState;
 use crate::walk::TerminalSession;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;

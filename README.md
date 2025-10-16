@@ -3,7 +3,7 @@ assembly viewing tool (this was a pet project but i found myself actually reachi
 the goal is to allow viewing dissasmblies from the perspective of the source file without taking over your compilation setup.
 
 
-![example of walk](https://github.com/nevakrien/SourceViewer/raw/main/example_cpp.png)
+![example of walk](https://github.com/nevakrien/SourceViewer/raw/main/new_example_cpp.png)
 
 ## Installation
 

@@ -220,15 +220,13 @@ impl CodeFile {
 
             if let Some(line_map) = map.get(&path) {
                 for (line, v) in line_map.iter_maped() {
-                    let spot = self
+                    self
                         .asm
                         .entry(*line)
                         .or_insert_with(HashMap::new)
                         .entry(obj_path.clone())
-                        .or_insert_with(Vec::new);
-
-                    spot.reserve(v.len());
-                    spot.extend_from_slice(v);
+                        .or_insert_with(Vec::new)
+                        .extend_from_slice(v);
                 }
             }
         }

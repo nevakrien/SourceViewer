@@ -626,7 +626,9 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             .add_modifier(Modifier::BOLD),
     ));
 
-    let mut prev = -1isize;
+    // let mut prev = -1isize;
+    let mut prev_end = 0u64;
+
     // let mut asm_items = Vec::new();
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
@@ -635,17 +637,22 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
         .map(|(_, v)| v.clone())
         .take(max_visible_lines)
     {
-        if ins.serial_number as isize != prev + 1 {
+        // if ins.serial_number as isize != prev + 1 {
+        if ins.address != prev_end {
             asm_items.push(
                 ListItem::new(vec![Spans::from("...")]).style(Style::default().fg(Color::Red)),
             )
         }
+        prev_end = ins.get_end();
+        
 
         //print
-        prev = ins.serial_number as isize;
+        // prev = ins.serial_number as isize;
         let formatted_instruction = format!(
-            "{:<4} {:#010x}: {:<6} {:<30} {:<30}",
-            ins.serial_number,
+            // "{:<4} {:#010x}: {:<6} {:<30} {:<30}",
+            // ins.serial_number,
+            "{:#010x}: {:<6} {:<30} {:<30}",
+
             ins.address,
             ins.mnemonic,
             ins.op_str,
