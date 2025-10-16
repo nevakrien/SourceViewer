@@ -104,7 +104,7 @@ impl CodeSection<'_> {
     pub fn get_asm(&self, arch: Architecture) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
         self.asm
             .get_or_try_init(|| {
-                let cs = create_capstone(&arch)?;
+                let cs = create_capstone(arch)?;
                 dissasm(&cs, self.data, self.address)
             })
             .cloned()
@@ -264,13 +264,13 @@ impl<'a> MachineFile<'a> {
 
             match (ans.get_addr2line(), need_ctx) {
                 (Ok(_ctx), _) => {
-                    slow_compile(&mut ans, &arch)?;
+                    slow_compile(&mut ans, arch)?;
                 }
                 (Err(e), true) => return Err(e),
                 (Err(_e), false) => {
                     //slow fallback
                     // eprintln!("⚠️ failed to retrive dwarf info, runing slow single thread disassembler");
-                    slow_compile(&mut ans, &arch)?;
+                    slow_compile(&mut ans, arch)?;
                 }
             }
         }
@@ -279,8 +279,8 @@ impl<'a> MachineFile<'a> {
 }
 
 #[inline(always)]
-fn slow_compile(ans: &mut MachineFile, arch: &Architecture) -> Result<(), Box<dyn Error>> {
-    let cs = create_capstone(&arch)?;
+fn slow_compile(ans: &mut MachineFile, arch: Architecture) -> Result<(), Box<dyn Error>> {
+    let cs = create_capstone(arch)?;
     for s in ans.sections.iter_mut() {
         match s {
             Section::Code(c) => {
@@ -301,7 +301,7 @@ fn get_first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u6
     }
 }
 
-fn create_capstone(arch: &object::Architecture) -> Result<Capstone, Box<dyn Error>> {
+fn create_capstone(arch: object::Architecture) -> Result<Capstone, Box<dyn Error>> {
     let mut cs = match arch {
         object::Architecture::X86_64 => Capstone::new()
             .x86()
