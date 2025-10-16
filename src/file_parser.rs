@@ -218,7 +218,7 @@ fn dissasm_fast(
 ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
 use crossbeam_channel::TryRecvError;
     
-    const STEP:u64 = 4*1024 * 1024;
+    const STEP:u64 = 1024 * 1024;
 
 //1. find reasonble start points
     let mut diffs = Vec::<(u64,u64)>::new();
