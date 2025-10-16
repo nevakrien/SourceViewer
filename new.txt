@@ -1,0 +1,137 @@
+Loading file "sample_code/hello-world"
+Non-Executable Section: .interp (28 bytes)
+Non-Executable Section: .note.gnu.property (48 bytes)
+Non-Executable Section: .note.gnu.build-id (36 bytes)
+Non-Executable Section: .note.ABI-tag (32 bytes)
+Non-Executable Section: .gnu.hash (36 bytes)
+Non-Executable Section: .dynsym (168 bytes)
+Non-Executable Section: .dynstr (143 bytes)
+Non-Executable Section: .gnu.version (14 bytes)
+Non-Executable Section: .gnu.version_r (48 bytes)
+Non-Executable Section: .rela.dyn (192 bytes)
+Non-Executable Section: .rela.plt (24 bytes)
+Code Section: .init (8 instructions)
+  0x00001000: endbr64                                
+  0x00001004: sub    rsp, 8                         
+  0x00001008: mov    rax, qword ptr [rip + 0x2fd9]  
+  0x0000100f: test   rax, rax                       
+  0x00001012: je     0x1016                         
+  0x00001014: call   rax                            
+  0x00001016: add    rsp, 8                         
+  0x0000101a: ret                                   
+Code Section: .plt (7 instructions)
+  0x00001020: push   qword ptr [rip + 0x2f9a]       
+  0x00001026: jmp    qword ptr [rip + 0x2f9c]       
+  0x0000102c: nop    dword ptr [rax]                
+  0x00001030: endbr64                                
+  0x00001034: push   0                              
+  0x00001039: jmp    0x1020                         
+  0x0000103e: nop                                   
+Code Section: .plt.got (3 instructions)
+  0x00001040: endbr64                                
+  0x00001044: jmp    qword ptr [rip + 0x2fae]       
+  0x0000104a: nop    word ptr [rax + rax]           
+Code Section: .plt.sec (3 instructions)
+  0x00001050: endbr64                                
+  0x00001054: jmp    qword ptr [rip + 0x2f76]       
+  0x0000105a: nop    word ptr [rax + rax]           
+Code Section: .text (74 instructions)
+  0x0000117a: leave                                 main
+  0x0000117b: ret                                   main
+  0x0000115c: mov    eax, dword ptr [rbp - 4]       main
+  0x0000115f: mov    esi, eax                       main
+  0x00001161: lea    rax, [rip + 0xe9c]             main
+  0x00001168: mov    rdi, rax                       main
+  0x0000116b: mov    eax, 0                         main
+  0x00001170: call   0x1050                         main
+  0x00001175: mov    eax, 0                         main
+  0x00001060: endbr64                                
+  0x00001064: xor    ebp, ebp                       
+  0x00001066: mov    r9, rdx                        
+  0x00001069: pop    rsi                            
+  0x0000106a: mov    rdx, rsp                       
+  0x0000106d: and    rsp, 0xfffffffffffffff0        
+  0x00001071: push   rax                            
+  0x00001072: push   rsp                            
+  0x00001073: xor    r8d, r8d                       
+  0x00001076: xor    ecx, ecx                       
+  0x00001078: lea    rdi, [rip + 0xca]              
+  0x0000107f: call   qword ptr [rip + 0x2f53]       
+  0x00001085: hlt                                   
+  0x00001086: nop    word ptr cs:[rax + rax]        
+  0x00001090: lea    rdi, [rip + 0x2f79]            
+  0x00001097: lea    rax, [rip + 0x2f72]            
+  0x0000109e: cmp    rax, rdi                       
+  0x000010a1: je     0x10b8                         
+  0x000010a3: mov    rax, qword ptr [rip + 0x2f36]  
+  0x000010aa: test   rax, rax                       
+  0x000010ad: je     0x10b8                         
+  0x000010af: jmp    rax                            
+  0x000010b1: nop    dword ptr [rax]                
+  0x000010b8: ret                                   
+  0x000010b9: nop    dword ptr [rax]                
+  0x000010c0: lea    rdi, [rip + 0x2f49]            
+  0x000010c7: lea    rsi, [rip + 0x2f42]            
+  0x000010ce: sub    rsi, rdi                       
+  0x000010d1: mov    rax, rsi                       
+  0x000010d4: shr    rsi, 0x3f                      
+  0x000010d8: sar    rax, 3                         
+  0x000010dc: add    rsi, rax                       
+  0x000010df: sar    rsi, 1                         
+  0x000010e2: je     0x10f8                         
+  0x000010e4: mov    rax, qword ptr [rip + 0x2f05]  
+  0x000010eb: test   rax, rax                       
+  0x000010ee: je     0x10f8                         
+  0x000010f0: jmp    rax                            
+  0x000010f2: nop    word ptr [rax + rax]           
+  0x000010f8: ret                                   
+  0x000010f9: nop    dword ptr [rax]                
+  0x00001100: endbr64                                
+  0x00001104: cmp    byte ptr [rip + 0x2f05], 0     
+  0x0000110b: jne    0x1138                         
+  0x0000110d: push   rbp                            
+  0x0000110e: cmp    qword ptr [rip + 0x2ee2], 0    
+  0x00001116: mov    rbp, rsp                       
+  0x00001119: je     0x1127                         
+  0x0000111b: mov    rdi, qword ptr [rip + 0x2ee6]  
+  0x00001122: call   0x1040                         
+  0x00001127: call   0x1090                         
+  0x0000112c: mov    byte ptr [rip + 0x2edd], 1     
+  0x00001133: pop    rbp                            
+  0x00001134: ret                                   
+  0x00001135: nop    dword ptr [rax]                
+  0x00001138: ret                                   
+  0x00001139: nop    dword ptr [rax]                
+  0x00001140: endbr64                                
+  0x00001144: jmp    0x10c0                         
+  0x00001149: endbr64                                main
+  0x0000114d: push   rbp                            main
+  0x0000114e: mov    rbp, rsp                       main
+  0x00001151: sub    rsp, 0x10                      main
+  0x00001155: mov    dword ptr [rbp - 4], edi       main
+  0x00001158: mov    qword ptr [rbp - 0x10], rsi    main
+Code Section: .fini (4 instructions)
+  0x0000117c: endbr64                                
+  0x00001180: sub    rsp, 8                         
+  0x00001184: add    rsp, 8                         
+  0x00001188: ret                                   
+Non-Executable Section: .rodata (30 bytes)
+Non-Executable Section: .eh_frame_hdr (52 bytes)
+Non-Executable Section: .eh_frame (172 bytes)
+Non-Executable Section: .init_array (8 bytes)
+Non-Executable Section: .fini_array (8 bytes)
+Non-Executable Section: .dynamic (496 bytes)
+Non-Executable Section: .got (72 bytes)
+Non-Executable Section: .data (16 bytes)
+Non-Executable Section: .bss (0 bytes)
+Non-Executable Section: .comment (43 bytes)
+Non-Executable Section: .debug_aranges (48 bytes)
+Non-Executable Section: .debug_info (219 bytes)
+Non-Executable Section: .debug_abbrev (144 bytes)
+Non-Executable Section: .debug_line (235 bytes)
+Non-Executable Section: .debug_str (21782 bytes)
+Non-Executable Section: .debug_line_str (561 bytes)
+Non-Executable Section: .debug_macro (4972 bytes)
+Non-Executable Section: .symtab (864 bytes)
+Non-Executable Section: .strtab (483 bytes)
+Non-Executable Section: .shstrtab (375 bytes)

@@ -100,74 +100,115 @@ fn dissasm(
 
 use std::collections::LinkedList;
 
-fn merge_linked_lists(
+
+pub fn merge_linked_lists(
     lists: Vec<LinkedList<Vec<InstructionDetail>>>,
 ) -> Vec<InstructionDetail> {
 
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap};
+    // Local helper struct — private to this function
     struct Stream {
-        next_block: Vec<InstructionDetail>,
+        current_block: Vec<InstructionDetail>,
         remaining_blocks: std::collections::linked_list::IntoIter<Vec<InstructionDetail>>,
+        index_in_block: usize,
     }
 
-    // Build initial streams
-    let mut streams: Vec<Stream> = lists
-        .into_iter()
-        .filter_map(|list| {
-            let mut iterator = list.into_iter();
-            iterator.next().map(|first_block| Stream {
-                next_block: first_block,
-                remaining_blocks: iterator,
-            })
-        })
-        .collect();
+    impl Stream {
+        #[inline]
+        fn current_addr(&self) -> Option<u64> {
+            self.current_block.get(self.index_in_block).map(|x| x.address)
+        }
 
-    // Sort ascending by first address of the next_block
-    streams.sort_by_key(|stream| {
-        stream
-            .next_block
-            .first()
-            .map(|ins| ins.address)
-            .unwrap_or(u64::MAX)
-    });
-
-    let mut merged: Vec<InstructionDetail> = Vec::new();
-
-    while let Some(mut stream) = streams.pop() {
-        // Pop the smallest (streams is sorted ascending, so back is smallest)
-        merged.extend(stream.next_block);
-
-        // Advance this stream
-        if let Some(next_block) = stream.remaining_blocks.next() {
-            if next_block.is_empty() {
-                continue;
+        #[inline]
+        fn advance(&mut self) -> Option<InstructionDetail> {
+            if self.index_in_block < self.current_block.len() {
+                let ins = self.current_block[self.index_in_block].clone();
+                self.index_in_block += 1;
+                Some(ins)
+            } else {
+                None
             }
-            let first_address = next_block.first().unwrap().address;//this is actually a bad unwrap
-            stream.next_block = next_block;
+        }
 
-            // Manual insertion (bubble-up) to keep streams sorted ascending by address
-            let mut insert_index = streams.len();
-            while insert_index > 0 {
-                let cmp_addr = streams[insert_index - 1]
-                    .next_block
-                    .first()
-                    .map(|ins| ins.address)
-                    .unwrap_or(u64::MAX);
-                if cmp_addr <= first_address {
-                    break;
+        #[inline]
+        fn load_next_block(&mut self) -> bool {
+            if self.index_in_block >= self.current_block.len() {
+                if let Some(next) = self.remaining_blocks.next() {
+                    self.current_block = next;
+                    self.index_in_block = 0;
+                    return true;
                 }
-                insert_index -= 1;
             }
-            streams.insert(insert_index, stream);
-            break;
+            false
         }
     }
 
-    for (k,ins) in merged.iter_mut().enumerate(){
-        ins.serial_number=k;
+    // --- Initialize streams and heap ---
+    let mut heap = BinaryHeap::<(Reverse<u64>, usize)>::new();
+    let mut streams: Vec<Stream> = Vec::new();
+
+    for list in lists {
+        let mut iter = list.into_iter();
+        if let Some(first_block) = iter.next() {
+            if let Some(first_addr) = first_block.first().map(|x| x.address) {
+                let index = streams.len();
+                streams.push(Stream {
+                    current_block: first_block,
+                    remaining_blocks: iter,
+                    index_in_block: 0,
+                });
+                heap.push((Reverse(first_addr), index));
+            }
+        }
+    }
+
+    // --- Multiway merge ---
+    let mut merged = Vec::<InstructionDetail>::new();
+
+    while let Some((Reverse(_addr), idx)) = heap.pop() {
+        let stream = &mut streams[idx];
+
+        if let Some(ins) = stream.advance() {
+            merged.push(ins);
+        }
+
+        if stream.index_in_block >= stream.current_block.len() {
+            stream.load_next_block();
+        }
+
+        if let Some(next_addr) = stream.current_addr() {
+            heap.push((Reverse(next_addr), idx));
+        }
+    }
+
+    // --- Renumber sequentially ---
+    for (k, ins) in merged.iter_mut().enumerate() {
+        ins.serial_number = k;
     }
 
     merged
 }
+
+// fn merge_linked_lists(
+//     lists: Vec<LinkedList<Vec<InstructionDetail>>>,
+// ) -> Vec<InstructionDetail> {
+//     // 1. Flatten everything into one big Vec
+//     let mut merged: Vec<InstructionDetail> = lists
+//         .into_iter()
+//         .flat_map(|list| list.into_iter().flatten())
+//         .collect();
+
+//     // 2. Sort globally by instruction address
+//     merged.sort_by_key(|ins| ins.address);
+
+//     // 3. Reassign serial numbers in order
+//     for (k, ins) in merged.iter_mut().enumerate() {
+//         ins.serial_number = k;
+//     }
+
+//     merged
+// }
 
 fn dissasm_fast(
     arch: &Architecture,
@@ -177,7 +218,7 @@ fn dissasm_fast(
 ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
 use crossbeam_channel::TryRecvError;
     
-    const STEP:u64 = 16;//1024 * 1024;
+    const STEP:u64 = 4*1024 * 1024;
 
 //1. find reasonble start points
     let mut diffs = Vec::<(u64,u64)>::new();
@@ -188,7 +229,7 @@ use crossbeam_channel::TryRecvError;
     diffs.push((base_address, 0));
 
     while cur_addr < end_addr {
-        let next_probe = cur_addr+1;// + STEP;
+        let next_probe = cur_addr + STEP;
         let Some(next_start) = get_past_valid(ctx, next_probe, end_addr)? else {
             break;
         };
@@ -201,22 +242,22 @@ use crossbeam_channel::TryRecvError;
     //we allways end on last adress
     diffs.last_mut().unwrap().1=end_addr;
 
-    // eprintln!("diffs {diffs:#?}");
-    eprintln!("==== Diffs ({}) ====", diffs.len());
-for (i, (start, end)) in diffs.iter().enumerate() {
-    let len = end.saturating_sub(*start);
-    let warn = if len == 0 {
-        "🚫 empty"
-    } else if len < 0x10 {
-        "⚠️ tiny"
-    } else {
-        ""
-    };
-    eprintln!(
-        "[{i:02}]  {start:#010x} .. {end:#010x}  (len={len:#06x}) {warn}",
-    );
-}
-eprintln!("=====================");
+//     // eprintln!("diffs {diffs:#?}");
+//     eprintln!("==== Diffs ({}) ====", diffs.len());
+// for (i, (start, end)) in diffs.iter().enumerate() {
+//     let len = end.saturating_sub(*start);
+//     let warn = if len == 0 {
+//         "🚫 empty"
+//     } else if len < 0x10 {
+//         "⚠️ tiny"
+//     } else {
+//         ""
+//     };
+//     eprintln!(
+//         "[{i:02}]  {start:#010x} .. {end:#010x}  (len={len:#06x}) {warn}",
+//     );
+// }
+// eprintln!("=====================");
 
 
     //bail if its too small
