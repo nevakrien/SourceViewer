@@ -314,7 +314,7 @@ pub fn view_source_command(
                 file_state.file_scroll = i.saturating_sub(1);
                 file_state.cursor = i.saturating_sub(1);
             };
-            let code_file = code_files.get_source_file(file_path.into())?;
+            let code_file = code_files.get_source_file(file_path.into(),true)?;
             let mut last_frame = Instant::now();
             let res = TerminalSession::walk_file_loop(
                 &mut last_frame,

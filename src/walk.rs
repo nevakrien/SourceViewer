@@ -727,7 +727,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
                 DirResult::File(mut file_state) => {
                     let path: Arc<Path> =
                         fs::canonicalize(Path::new(&file_state.file_path))?.into();
-                    let code_file = code_files.get_source_file(path)?;
+                    let code_file = code_files.get_source_file(path,false)?;
                     let res = Self::walk_file_loop(
                         &mut self.last_frame,
                         terminal,

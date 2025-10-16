@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
 use crate::file_parser::InstructionDetail;
@@ -191,49 +192,15 @@ impl CodeFile {
     }
 
     #[inline]
-    pub fn get_asm(&self, line: &u32, path: Arc<Path>) -> Option<&[InstructionDetail]> {
-        self.asm.get(line)?.get(&path).map(|x| x.as_slice()) //.unwrap_or(&[])
+    pub fn get_asm(&self, line: &u32, obj_path: Arc<Path>) -> Option<&[InstructionDetail]> {
+        self.asm.get(line)?.get(&obj_path).map(|x| x.as_slice()) //.unwrap_or(&[])
     }
 
-    // pub fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>) {
-    //     for (obj_path, res) in asm.map.iter_mut() {
-    //         let machine_file = match res {
-    //             Ok(x) => x,
-    //             Err(e) => {
-    //                 let error = StackedError::from_wraped(e.clone(), "while getting machine");
-    //                 self.errors.push((error, None));
-    //                 continue;
-    //             }
-    //         };
-    //         let map = match machine_file.get_lines_map() {
-    //             Ok(x) => x,
-    //             Err(e) => {
-    //                 let error = StackedError::new(e, "while making context");
-    //                 self.errors.push((error, None));
-    //                 continue;
-    //             }
-    //         };
 
-    //         if let Some(line_map) = map.get(&path) {
-    //             for (line, v) in line_map.iter_maped() {
-    //                 let spot = self
-    //                     .asm
-    //                     .entry(*line)
-    //                     .or_insert(HashMap::new())
-    //                     .entry(obj_path.clone())
-    //                     .or_insert(vec![]);
-
-    //                 spot.reserve(v.len());
-    //                 spot.extend_from_slice(v)
-    //             }
-    //         }
-    //     }
-    // }
-
-    pub fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>) {
+    fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>){
         // Helper closure that runs a fallible block, catches any Err,
         // pushes to self.errors, and continues the outer loop.
-        macro_rules! try_in_loop {
+        macro_rules! try_wrapped {
             ($expr:expr, $msg:expr) => {
                 match $expr {
                     Ok(v) => v,
@@ -248,8 +215,8 @@ impl CodeFile {
 
         for (obj_path, res) in asm.map.iter_mut() {
             // both can use normal `?` style thanks to the macro
-            let machine_file = try_in_loop!(res.as_ref().map_err(|e| e.clone().into()), "while getting machine");
-            let map = try_in_loop!(machine_file.get_lines_map(), "while making context");
+            let machine_file = try_wrapped!(res.as_ref().map_err(|e| e.clone().into()), "while getting machine");
+            let map = try_wrapped!(machine_file.get_lines_map(), "while making context");
 
             if let Some(line_map) = map.get(&path) {
                 for (line, v) in line_map.iter_maped() {
@@ -265,6 +232,30 @@ impl CodeFile {
                 }
             }
         }
+    }
+
+    pub fn get_error(&self)->Result<(),String>{
+        if !self.errors.is_empty() {
+            let mut output = String::new();
+
+            writeln!(
+                &mut output,
+                "⚠️  Warning: errors occurred while reading debug info ({} total):",
+                self.errors.len()
+            ).ok();
+
+            for (err, path_opt) in &self.errors {
+                let path_str = path_opt
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "<unknown>".to_string());
+
+                writeln!(&mut output, "• Path: {path_str}\n  Error: {err}\n").ok();
+            }
+
+            return Err(output)
+        }
+        Ok(())
     }
 
 }
@@ -302,7 +293,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
             .copied()
     }
 
-    pub fn get_source_file(&mut self, path: Arc<Path>) -> Result<&'r CodeFile, Box<dyn Error>> {
+    pub fn get_source_file(&mut self, path: Arc<Path>,dwarf_errors:bool) -> Result<&'r CodeFile, Box<dyn Error>> {
         match self.source_files.entry(path.clone()) {
             hash_map::Entry::Occupied(entry) => entry.get().clone().map_err(|e| e.clone().into()),
             hash_map::Entry::Vacant(entry) => {
@@ -320,6 +311,11 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
                 };
 
                 code_file.populate(self.asm, path);
+                if dwarf_errors{
+                    code_file.get_error()?
+                }
+                
+
 
                 entry.insert(Ok(code_file));
                 Ok(code_file)
