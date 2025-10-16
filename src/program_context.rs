@@ -53,7 +53,7 @@ impl<'a> FileRegistry<'a> {
                 };
                 let b = self.files_arena.alloc(buffer);
                 entry
-                    .insert(MachineFile::parse(b, false).map_err(WrapedError::new))
+                    .insert(MachineFile::parse(b).map_err(WrapedError::new))
                     .as_mut()
                     .map_err(|e| e.clone().into())
             }

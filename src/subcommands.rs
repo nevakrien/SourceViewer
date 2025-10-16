@@ -1,3 +1,4 @@
+use crate::file_parser::InstructionDetail;
 use fallible_iterator::FallibleIterator;
 use crate::args::FileSelection;
 use crate::program_context::find_func_name;
@@ -9,6 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::file_parser::create_capstone;
 use crate::file_parser::MachineFile;
 use crate::file_parser::Section;
 use crate::program_context::resolve_func_name;
@@ -51,18 +53,18 @@ pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let machine_file = registry.get_machine(file_path.into())?;
-        let arch = machine_file.obj.architecture();
         let ctx = machine_file.get_addr2line()?;
+        let cs = create_capstone(machine_file.obj.architecture())?;
 
         for section in &machine_file.sections.clone() {
             if let Section::Code(code_section) = section {
                 println!("{}", section.name());
 
-                for (_i, ins) in code_section.get_asm(arch)?.iter().enumerate() {
+                code_section.map_asm(&cs,&mut |ins| {
                     let (file, line) = match ctx.find_location(ins.address)? {
                         Some(loc) => {
                             if ignore_unknown && (loc.file.is_none()||loc.line.is_none()){
-                                continue;
+                                return Ok(());//closure
                             }
                             let file = loc.file.unwrap_or("<unknown>").to_string();
                             let line = loc.line.map(|i| {i.to_string()}).unwrap_or("<unknown>".to_string());
@@ -70,7 +72,7 @@ pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(
                         },
                         None => {
                             if ignore_unknown {
-                                continue;
+                                return Ok(());//closure
                             }
                             ("<unknown>".to_string(), "<unknown>".to_string())
                         }
@@ -92,7 +94,8 @@ pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(
                         file.to_string().yellow(),
                         line.to_string().blue()
                     );
-                }
+                    Ok(())
+                })?;
             }
         }
     }
@@ -140,7 +143,7 @@ pub fn dwarf_dump_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer, false)?;
+        let machine_file = MachineFile::parse(&buffer)?;
         // let dwarf = machine_file.load_dwarf()?;
         // println!("{:#?}",dwarf );
         list_dwarf_sections(&machine_file.obj)?;
@@ -155,20 +158,21 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let mut machine_file = MachineFile::parse(&buffer, true)?;
+        let mut machine_file = MachineFile::parse(&buffer)?;
         let debug = machine_file.get_addr2line().ok();
+        let cs = create_capstone(machine_file.obj.architecture())?;
 
         for section in &mut machine_file.sections {
             match section {
                 Section::Code(code_section) => {
                     // lazy.disasm(&machine_file.obj.architecture())?;
                     println!(
-                        "Code Section: {} ({} instructions)",
+                        "Code Section: {} ({} bytes)",
                         code_section.name.blue(),
-                        code_section.get_existing_asm().len()
+                        code_section.data.len()
                     );
 
-                    for instruction in code_section.get_existing_asm().iter() {
+                    code_section.map_asm(&cs,&mut |instruction:&InstructionDetail|{
                         let func_name = match &debug {
                             None => None,
                             Some(ctx) => resolve_func_name(ctx, instruction.address),
@@ -181,8 +185,9 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
                             instruction.mnemonic,
                             instruction.op_str,
                             func_name.as_deref().unwrap_or("")
-                        )
-                    }
+                        );
+                        Ok(())
+                    })?;
                 }
                 Section::Info(non_exec) => {
                     println!(
@@ -206,7 +211,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
     for file_path in file_paths {
         println!("{}", format!("Loading file {:?}", file_path).green().bold());
         let buffer = fs::read(file_path)?;
-        let machine_file = MachineFile::parse(&buffer, true)?;
+        let machine_file = MachineFile::parse(&buffer)?;
         let ctx = machine_file.get_addr2line()?;
         for section in machine_file.sections.iter(){
             let Section::Code(code) = section else{
@@ -252,8 +257,12 @@ pub fn view_source_command(
     }
 
     // Load and parse the binary
-    let buffer = fs::read(file_path)?;
-    let machine_file = MachineFile::parse(&buffer, true)?;
+    let obj_file: Arc<Path> = file_path.into();
+    let asm_arena = Arena::new();
+    let code_arena = Arena::new();
+    let mut registry = FileRegistry::new(&asm_arena);
+    let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
+    let machine_file = code_files.visit_machine_file(obj_file.clone())?;
     let ctx = machine_file.get_addr2line()?;
 
     // Populate a unique list of source files in the order they appear
@@ -276,14 +285,7 @@ pub fn view_source_command(
     source_files.sort();
 
     if walk {
-        let obj_file: Arc<Path> = file_path.into();
-        let asm_arena = Arena::new();
-        let code_arena = Arena::new();
-        let mut registry = FileRegistry::new(&asm_arena);
-        let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
-        code_files
-            .visit_machine_file(obj_file.clone())?
-            .get_lines_map()?;
+        machine_file.get_lines_map()?;
 
         let file_path = match &selections[0] {
             FileSelection::Index(i) => {

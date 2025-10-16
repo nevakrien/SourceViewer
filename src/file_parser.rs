@@ -16,6 +16,13 @@ use gimli::{read::Dwarf, EndianSlice, SectionId};
 use std::error::Error;
 // pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
 // pub type FileMap = HashMap<Arc<Path>,LineMap>;
+
+#[derive(Debug, Clone,Copy)]
+pub struct CodeRange{
+    pub address:u64,
+    pub size:usize,
+}
+
 #[derive(Debug, Default)]
 pub struct LineMap {
     inner: BTreeMap<u32, Vec<InstructionDetail>>,
@@ -97,20 +104,70 @@ fn dissasm(
     Ok(instructions.into())
 }
 
+pub fn map_dissasm(
+    cs: &Capstone,
+    data: &[u8],
+    address: u64,
+    f:&mut impl FnMut(InstructionDetail)->Result<(),Box<dyn Error>>,
+
+) -> Result<(), Box<dyn Error>> {
+    //we dissasm in chunks to be interactive and save memory
+    let mut cur_address = address;
+    let mut cur_data = data;
+
+    loop{
+        let disasm = cs.disasm_count(cur_data, cur_address,1000)?;
+            
+        let Some(last) = disasm.last() else {
+            return Ok(());
+        };
+        let end = last.address()+last.len() as u64;
+        cur_data = &cur_data[(end-cur_address)as usize..];
+        cur_address = end;
+
+
+        for (_serial_number, insn) in disasm.iter().enumerate() {
+            f(InstructionDetail {
+                // serial_number,
+                address: insn.address(),
+                mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
+                op_str: insn.op_str().unwrap_or("unknown").into(),
+                size: insn.len(),
+            })?;
+        } 
+    }
+
+    
+}
+
 impl CodeSection<'_> {
     pub fn get_existing_asm(&self) -> Arc<[InstructionDetail]> {
         self.asm.get().unwrap().clone()
     }
-    pub fn get_asm(&self, arch: Architecture) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+ 
+
+    pub fn map_asm(&self, cs: &Capstone,f:&mut impl FnMut(&InstructionDetail)->Result<(),Box<dyn Error>>,) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+        if let Some(ans) = self.asm.get(){
+            for ins in ans.iter() {
+                f(&ins)?;
+            }
+
+            return Ok(ans.clone())
+        }
         self.asm
             .get_or_try_init(|| {
-                let cs = create_capstone(arch)?;
-                dissasm(&cs, self.data, self.address)
+                let mut instructions = Vec::new();
+                map_dissasm(&cs, self.data, self.address,&mut |ins|{
+                    f(&ins)?;
+                    instructions.push(ins);
+                    Ok(())
+                })?;
+                Ok(instructions.into())
             })
             .cloned()
     }
 
-    pub fn get_asm_capstone(
+    pub fn get_asm(
         &self,
         cs: &Capstone,
     ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
@@ -157,7 +214,8 @@ impl<'a> MachineFile<'a> {
                     let Section::Code(code_section) = section else{
                         continue;
                     };
-                    for instruction in code_section.get_asm(self.obj.architecture())?.iter() {
+                    let cs = create_capstone(self.obj.architecture())?;
+                    for instruction in code_section.get_asm(&cs)?.iter() {
                         if let Some(loc) = context.find_location(instruction.address)? {
                             match (loc.file, loc.line) {
                                 (Some(file_name), Some(line)) => {
@@ -225,9 +283,8 @@ impl<'a> MachineFile<'a> {
             .cloned()
     }
 
-    pub fn parse(buffer: &'a [u8], parse_asm: bool) -> Result<MachineFile<'a>, Box<dyn Error>> {
+    pub fn parse(buffer: &'a [u8]) -> Result<MachineFile<'a>, Box<dyn Error>> {
         let obj = object::File::parse(buffer)?;
-        let arch = obj.architecture();
         let mut parsed_sections = Vec::new();
 
         for section in obj.sections() {
@@ -251,7 +308,7 @@ impl<'a> MachineFile<'a> {
             }
         }
 
-        let mut ans = MachineFile {
+        let ans = MachineFile {
             obj,
             sections: parsed_sections.into(),
             dwarf: OnceCell::new(),
@@ -259,21 +316,7 @@ impl<'a> MachineFile<'a> {
             file_lines:OnceCell::new(),
         };
 
-        if parse_asm {
-            let need_ctx = false;
 
-            match (ans.get_addr2line(), need_ctx) {
-                (Ok(_ctx), _) => {
-                    slow_compile(&mut ans, arch)?;
-                }
-                (Err(e), true) => return Err(e),
-                (Err(_e), false) => {
-                    //slow fallback
-                    // eprintln!("⚠️ failed to retrive dwarf info, runing slow single thread disassembler");
-                    slow_compile(&mut ans, arch)?;
-                }
-            }
-        }
         Ok(ans)
     }
 }
@@ -284,7 +327,7 @@ fn slow_compile(ans: &mut MachineFile, arch: Architecture) -> Result<(), Box<dyn
     for s in ans.sections.iter_mut() {
         match s {
             Section::Code(c) => {
-                c.get_asm_capstone(&cs)?;
+                c.get_asm(&cs)?;
             }
             _ => {}
         }
@@ -301,7 +344,7 @@ fn get_first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u6
     }
 }
 
-fn create_capstone(arch: object::Architecture) -> Result<Capstone, Box<dyn Error>> {
+pub fn create_capstone(arch: object::Architecture) -> Result<Capstone, Box<dyn Error>> {
     let mut cs = match arch {
         object::Architecture::X86_64 => Capstone::new()
             .x86()
