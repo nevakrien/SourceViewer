@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
 use object::Architecture;
 use object::{Object, ObjectSection, SectionFlags};
@@ -14,37 +15,38 @@ use capstone::prelude::*;
 use gimli::RunTimeEndian;
 use gimli::{read::Dwarf, EndianSlice, SectionId};
 use std::error::Error;
+use fallible_iterator::FallibleIterator;
 // pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
 // pub type FileMap = HashMap<Arc<Path>,LineMap>;
 
 #[derive(Debug, Clone,Copy)]
-pub struct CodeRange{
+pub struct CodeRange<'a>{
     pub address:u64,
-    pub size:usize,
+    pub data:&'a[u8]
 }
 
 #[derive(Debug, Default)]
-pub struct LineMap {
-    inner: BTreeMap<u32, Vec<InstructionDetail>>,
-    extra: Vec<InstructionDetail>,
+pub struct LineMap<'a> {
+    inner: BTreeMap<u32, Vec<CodeRange<'a>>>,
+    extra: Vec<CodeRange<'a>>,
 }
 
-impl LineMap {
+impl<'a> LineMap<'a> {
     #[inline(always)]
-    pub fn iter_maped(&'_ self) -> btree_map::Iter<'_, u32, Vec<InstructionDetail>> {
+    pub fn iter_maped(&'_ self) -> btree_map::Iter<'_, u32, Vec<CodeRange<'a>>> {
         self.inner.iter()
     }
 }
 
 #[derive(Debug, Default)]
-pub struct FileMap {
-    inner: HashMap<Arc<Path>, LineMap>,
-    extra: Vec<InstructionDetail>,
+pub struct FileMap<'a> {
+    inner: HashMap<Arc<Path>, LineMap<'a>>,
+    extra: Vec<CodeRange<'a>>,
 }
 
-impl FileMap {
+impl<'a> FileMap<'a> {
     #[inline(always)]
-    pub fn get(&self, id: &Arc<Path>) -> Option<&LineMap> {
+    pub fn get(&self, id: &Arc<Path>) -> Option<&LineMap<'a>> {
         self.inner.get(id)
     }
 }
@@ -57,7 +59,8 @@ pub struct MachineFile<'a> {
     pub sections: Box<[Section<'a>]>,
     dwarf: OnceCell<Arc<Dwarf<Endian<'a>>>>,
     addr2line: OnceCell<Arc<Context<Endian<'a>>>>,
-    file_lines: OnceCell<Arc<FileMap>>, //line -> instruction>
+    file_lines: OnceCell<Arc<FileMap<'a>>>, //line -> instruction>
+    capstone:OnceCell<Rc<Capstone>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -201,7 +204,7 @@ impl InstructionDetail {
 }
 
 impl<'a> MachineFile<'a> {
-    pub fn get_lines_map(&self) -> Result<Arc<FileMap>, Box<dyn Error>> {
+    pub fn get_lines_map(&self) -> Result<Arc<FileMap<'a>>, Box<dyn Error>> {
         self.file_lines
             .get_or_try_init(|| {
                 let context = self.get_addr2line()?;
@@ -214,10 +217,33 @@ impl<'a> MachineFile<'a> {
                     let Section::Code(code_section) = section else{
                         continue;
                     };
-                    let cs = create_capstone(self.obj.architecture())?;
-                    for instruction in code_section.get_asm(&cs)?.iter() {
-                        if let Some(loc) = context.find_location(instruction.address)? {
-                            match (loc.file, loc.line) {
+
+                    let end_address = code_section.address+code_section.data.len() as u64;
+                    let mut iter = context.find_location_range(code_section.address,end_address)?;
+                    let mut prev_end = code_section.address;
+
+                    while let Some((low,size,loc)) = FallibleIterator::next(&mut iter)?{
+
+                        if low != prev_end{
+                            let size = (low-prev_end) as usize;
+                            let start_idx =(prev_end-code_section.address)as usize;
+                            let data = &code_section.data[start_idx..][..size];
+                            handle.extra.push(CodeRange{
+                                address:prev_end,
+                                data,
+                            })
+                        }
+
+                        prev_end = low+size;
+                        let start_idx =(low-code_section.address)as usize;
+                        let data = &code_section.data[start_idx..][..size as usize];
+
+                        let cur_range = CodeRange{
+                            address:low,
+                            data
+                        };
+
+                        match (loc.file, loc.line) {
                                 (Some(file_name), Some(line)) => {
                                     let file = Path::new(file_name).into();
 
@@ -228,7 +254,7 @@ impl<'a> MachineFile<'a> {
                                         .inner
                                         .entry(line)
                                         .or_default()
-                                        .push(instruction.clone());
+                                        .push(cur_range);
                                 }
                                 (Some(file_name), None) => {
                                     let file = Path::new(file_name).into();
@@ -238,15 +264,47 @@ impl<'a> MachineFile<'a> {
                                         .entry(file)
                                         .or_default()
                                         .extra
-                                        .push(instruction.clone());
+                                        .push(cur_range);
                                 }
-                                (None, _) => handle.extra.push(instruction.clone()),
+                                (None, _) => handle.extra.push(cur_range),
                             }
-                        } else {
-                            handle.extra.push(instruction.clone())
                         }
+
                     }
-                }
+
+                    // let cs = create_capstone(self.obj.architecture())?;
+                    // for instruction in code_section.get_asm(&cs)?.iter() {
+                    //     if let Some(loc) = context.find_location(instruction.address)? {
+                    //         match (loc.file, loc.line) {
+                    //             (Some(file_name), Some(line)) => {
+                    //                 let file = Path::new(file_name).into();
+
+                    //                 handle
+                    //                     .inner
+                    //                     .entry(file)
+                    //                     .or_default()
+                    //                     .inner
+                    //                     .entry(line)
+                    //                     .or_default()
+                    //                     .push(instruction.clone());
+                    //             }
+                    //             (Some(file_name), None) => {
+                    //                 let file = Path::new(file_name).into();
+
+                    //                 handle
+                    //                     .inner
+                    //                     .entry(file)
+                    //                     .or_default()
+                    //                     .extra
+                    //                     .push(instruction.clone());
+                    //             }
+                    //             (None, _) => handle.extra.push(instruction.clone()),
+                    //         }
+                    //     } else {
+                    //         handle.extra.push(instruction.clone())
+                    //     }
+                    // }
+                // }
                 Ok(ans)
             })
             .cloned()
@@ -283,6 +341,12 @@ impl<'a> MachineFile<'a> {
             .cloned()
     }
 
+    pub fn get_capstone(&self) -> Result<Rc<Capstone>, Box<dyn Error>> {
+        self.capstone
+            .get_or_try_init(|| Ok(create_capstone(self.obj.architecture())?.into()))
+            .cloned()
+    }
+
     pub fn parse(buffer: &'a [u8]) -> Result<MachineFile<'a>, Box<dyn Error>> {
         let obj = object::File::parse(buffer)?;
         let mut parsed_sections = Vec::new();
@@ -314,6 +378,7 @@ impl<'a> MachineFile<'a> {
             dwarf: OnceCell::new(),
             addr2line: OnceCell::new(),
             file_lines:OnceCell::new(),
+            capstone:OnceCell::new(),
         };
 
 
@@ -337,7 +402,7 @@ fn slow_compile(ans: &mut MachineFile, arch: Architecture) -> Result<(), Box<dyn
 
 fn get_first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
     let mut iter = ctx.find_location_range(start,end)?;
-    if let Some((start,_,_)) = iter.next(){
+    if let Some((start,_,_)) = FallibleIterator::next(&mut iter)?{
         Ok(Some(start))
     }else{
         Ok(None)

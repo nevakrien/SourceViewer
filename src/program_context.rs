@@ -1,14 +1,17 @@
+use once_cell::unsync::OnceCell;
+use crate::file_parser::map_dissasm;
+use capstone::Capstone;
+use std::rc::Rc;
+use crate::file_parser::CodeRange;
 use std::fmt::Write;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
 use crate::file_parser::InstructionDetail;
 use crate::file_parser::MachineFile;
-use crate::file_parser::Section;
 use addr2line::LookupContinuation;
 use addr2line::LookupResult;
 use gimli::EndianSlice;
 use gimli::RunTimeEndian;
-use object::Object;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs;
@@ -167,14 +170,46 @@ pub fn find_func_name<'a, 'b: 'a>(
 //     pub file: Arc<Path>
 // }
 
+pub struct LazeyAsm<'a>{
+    ranges: Vec<CodeRange<'a>>,
+    cs:Rc<Capstone>,
+    asm:OnceCell<Box<[InstructionDetail]>>
+}
+
+impl<'a> LazeyAsm<'a>{
+    pub fn new(cs:Rc<Capstone>)->Self{
+        Self{
+            ranges:Vec::new(),
+            asm:OnceCell::new(),
+            cs,
+        }
+    }
+
+    pub fn make_asm(&self)->Result<&[InstructionDetail],Box<dyn Error>>{
+        self.asm.get_or_try_init(||{
+            let mut ans = Vec::new();
+            for r in &self.ranges{
+                map_dissasm(
+                    &self.cs,
+                    r.data,
+                    r.address,
+                    &mut |ins|{Ok(ans.push(ins))}
+                )?;
+            }
+            Ok(ans.into())
+        }).map(|b|&**b)
+        
+    }
+}
+
 // #[derive(PartialEq)]
-pub struct CodeFile {
+pub struct CodeFile<'a> {
     pub text: String,
-    asm: BTreeMap<u32, HashMap<Arc<Path>, Vec<InstructionDetail>>>, //line -> instruction
+    asm: BTreeMap<u32, HashMap<Arc<Path>, LazeyAsm<'a>>>, //line -> instruction
     pub errors: Vec<(StackedError, Option<Arc<Path>>)>,
 }
 
-impl CodeFile {
+impl<'a> CodeFile<'a> {
     pub fn read(path: &Path) -> Result<Self, Box<dyn Error>> {
         let text = fs::read_to_string(path)?;
         Ok(CodeFile {
@@ -186,18 +221,23 @@ impl CodeFile {
 
     pub fn read_arena<'r>(
         path: &Path,
-        arena: &'r Arena<CodeFile>,
+        arena: &'r Arena<CodeFile<'a>>,
     ) -> Result<&'r mut Self, Box<dyn Error>> {
         Ok(arena.alloc(CodeFile::read(path)?))
     }
 
+    // #[inline]
+    // pub fn get_asm(&self, line: &u32, obj_path: Arc<Path>) -> Option<&[InstructionDetail]> {
+    //     self.asm.get(line)?.get(&obj_path).map(|x| x.as_slice()) //.unwrap_or(&[])
+    // }
+
     #[inline]
-    pub fn get_asm(&self, line: &u32, obj_path: Arc<Path>) -> Option<&[InstructionDetail]> {
-        self.asm.get(line)?.get(&obj_path).map(|x| x.as_slice()) //.unwrap_or(&[])
+    pub fn get_asm(&self, line: &u32, obj_path: Arc<Path>) -> Option<Result<&[InstructionDetail],Box<dyn Error>>> {
+        self.asm.get(line)?.get(&obj_path).map(|x| x.make_asm()) //.unwrap_or(&[])
     }
 
 
-    fn populate(&mut self, asm: &mut FileRegistry<'_>, path: Arc<Path>){
+    fn populate(&mut self, asm: &mut FileRegistry<'a>, path: Arc<Path>){
         // Helper closure that runs a fallible block, catches any Err,
         // pushes to self.errors, and continues the outer loop.
         macro_rules! try_wrapped {
@@ -216,6 +256,7 @@ impl CodeFile {
         for (obj_path, res) in asm.map.iter_mut() {
             // both can use normal `?` style thanks to the macro
             let machine_file = try_wrapped!(res.as_ref().map_err(|e| e.clone().into()), "while getting machine");
+            let cs = try_wrapped!(machine_file.get_capstone(), "while making dissasmbler");
             let map = try_wrapped!(machine_file.get_lines_map(), "while making context");
 
             if let Some(line_map) = map.get(&path) {
@@ -225,8 +266,8 @@ impl CodeFile {
                         .entry(*line)
                         .or_insert_with(HashMap::new)
                         .entry(obj_path.clone())
-                        .or_insert_with(Vec::new)
-                        .extend_from_slice(v);
+                        .or_insert_with(||LazeyAsm::new(cs.clone()))
+                        .ranges.extend_from_slice(v);
                 }
             }
         }
@@ -259,15 +300,15 @@ impl CodeFile {
 }
 
 pub struct CodeRegistry<'data, 'r> {
-    pub source_files: HashMap<Arc<Path>, Result<&'r CodeFile, Box<WrapedError>>>,
+    pub source_files: HashMap<Arc<Path>, Result<&'r CodeFile<'data>, Box<WrapedError>>>,
     pub asm: &'r mut FileRegistry<'data>,
-    arena: &'r Arena<CodeFile>,
+    arena: &'r Arena<CodeFile<'data>>,
     // pub visited : HashSet<Arc<Path>>,
     // pub asm: FileRegistry<'a>,
 }
 
 impl<'data, 'r> CodeRegistry<'data, 'r> {
-    pub fn new(asm: &'r mut FileRegistry<'data>, arena: &'r Arena<CodeFile>) -> Self {
+    pub fn new(asm: &'r mut FileRegistry<'data>, arena: &'r Arena<CodeFile<'data>>) -> Self {
         CodeRegistry {
             asm,
             arena,
@@ -282,7 +323,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
     pub fn get_existing_source_file(
         &self,
         path: &Arc<Path>,
-    ) -> Result<&'r CodeFile, Box<dyn Error>> {
+    ) -> Result<&'r CodeFile<'data>, Box<dyn Error>> {
         self.source_files
             .get(path)
             .unwrap()
@@ -291,7 +332,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
             .copied()
     }
 
-    pub fn get_source_file(&mut self, path: Arc<Path>,dwarf_errors:bool) -> Result<&'r CodeFile, Box<dyn Error>> {
+    pub fn get_source_file(&mut self, path: Arc<Path>,dwarf_errors:bool) -> Result<&'r CodeFile<'data>, Box<dyn Error>> {
         match self.source_files.entry(path.clone()) {
             hash_map::Entry::Occupied(entry) => entry.get().clone().map_err(|e| e.clone().into()),
             hash_map::Entry::Vacant(entry) => {

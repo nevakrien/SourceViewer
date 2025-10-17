@@ -1,3 +1,4 @@
+use std::error::Error;
 use crate::file_parser::InstructionDetail;
 use crate::program_context::CodeFile;
 use crate::program_context::CodeRegistry;
@@ -199,12 +200,16 @@ impl<'data> Line<'data> {
         &mut self,
         code_file: &'data CodeFile,
         obj_path: Arc<Path>,
-    ) -> Option<&'data [InstructionDetail]> {
+    ) -> Result<Option<&'data [InstructionDetail]>,Box<dyn Error>> {
         match self.debug_info {
-            Some(x) => x,
+            Some(x) => Ok(x),
             None => {
-                self.debug_info = Some(code_file.get_asm(&(self.line_number as u32), obj_path));
-                self.debug_info.unwrap()
+                let ans = match code_file.get_asm(&(self.line_number as u32), obj_path){
+                    Some(res)=>Some(res?),
+                    None=>None,
+                };
+                self.debug_info = Some(ans);
+                Ok(self.debug_info.unwrap())
             }
         }
     }
@@ -402,7 +407,7 @@ pub fn handle_file_input<'arena>(
     state: &mut FileState<'_, 'arena>,
     code_file: &'arena CodeFile,
     obj_path: Arc<Path>,
-) -> Result<FileResult, io::Error> {
+) -> Result<FileResult,Box<dyn Error>> {
     match event::read()? {
         Event::Key(KeyEvent { code, kind, .. }) => {
             if crossterm::event::KeyEventKind::Release == kind {
@@ -454,9 +459,9 @@ pub fn handle_file_input<'arena>(
                         let info = line.load_debug(code_file, obj_path);
 
                         if line.is_selected {
-                            state.global.add_asm_line(info, line.content.clone())
+                            state.global.add_asm_line(info?, line.content.clone())
                         } else {
-                            state.global.remove_asm_line(info)
+                            state.global.remove_asm_line(info?)
                         }
                     } else {
                         unreachable!();
