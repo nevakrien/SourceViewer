@@ -224,7 +224,8 @@ impl<'a> MachineFile<'a> {
 
                     while let Some((low,size,loc)) = FallibleIterator::next(&mut iter)?{
 
-                        if low != prev_end{
+                        // if low != prev_end{
+                        if low > prev_end{
                             let size = (low-prev_end) as usize;
                             let start_idx =(prev_end-code_section.address)as usize;
                             let data = &code_section.data[start_idx..][..size];
@@ -271,40 +272,6 @@ impl<'a> MachineFile<'a> {
                         }
 
                     }
-
-                    // let cs = create_capstone(self.obj.architecture())?;
-                    // for instruction in code_section.get_asm(&cs)?.iter() {
-                    //     if let Some(loc) = context.find_location(instruction.address)? {
-                    //         match (loc.file, loc.line) {
-                    //             (Some(file_name), Some(line)) => {
-                    //                 let file = Path::new(file_name).into();
-
-                    //                 handle
-                    //                     .inner
-                    //                     .entry(file)
-                    //                     .or_default()
-                    //                     .inner
-                    //                     .entry(line)
-                    //                     .or_default()
-                    //                     .push(instruction.clone());
-                    //             }
-                    //             (Some(file_name), None) => {
-                    //                 let file = Path::new(file_name).into();
-
-                    //                 handle
-                    //                     .inner
-                    //                     .entry(file)
-                    //                     .or_default()
-                    //                     .extra
-                    //                     .push(instruction.clone());
-                    //             }
-                    //             (None, _) => handle.extra.push(instruction.clone()),
-                    //         }
-                    //     } else {
-                    //         handle.extra.push(instruction.clone())
-                    //     }
-                    // }
-                // }
                 Ok(ans)
             })
             .cloned()

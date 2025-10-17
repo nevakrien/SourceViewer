@@ -621,8 +621,6 @@ pub fn render_file_asm_viewer(
 }
 
 fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> List<'a>
-// op:Option<I>,
- // where I: Iterator<Item = &'a InstructionDetail> + ExactSizeIterator ,
 {
     let asm_block = Block::default().borders(Borders::ALL).title(Span::styled(
         "Assembly View",
@@ -631,10 +629,8 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             .add_modifier(Modifier::BOLD),
     ));
 
-    // let mut prev = -1isize;
     let mut prev_end = 0u64;
 
-    // let mut asm_items = Vec::new();
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
 
     for (ins, text) in state
@@ -642,8 +638,7 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
         .map(|(_, v)| v.clone())
         .take(max_visible_lines)
     {
-        // if ins.serial_number as isize != prev + 1 {
-        if ins.address != prev_end {
+        if ins.address > prev_end {
             asm_items.push(
                 ListItem::new(vec![Spans::from("...")]).style(Style::default().fg(Color::Red)),
             )
@@ -652,10 +647,7 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
         
 
         //print
-        // prev = ins.serial_number as isize;
         let formatted_instruction = format!(
-            // "{:<4} {:#010x}: {:<6} {:<30} {:<30}",
-            // ins.serial_number,
             "{:#010x}: {:<6} {:<30} {:<30}",
 
             ins.address,
