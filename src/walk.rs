@@ -257,13 +257,23 @@ impl<'data> Line<'data> {
         code_file: &'data CodeFile,
         obj_path: Arc<Path>,
     ) -> Result<Option<&'data [InstructionDetail]>,Box<dyn Error>> {
+        // eprintln!("LOAD_DEBUG for line {} file {}", self.line_number, obj_path.display());
+
         match self.debug_info {
             Some(x) => Ok(x),
             None => {
                 let ans = match code_file.get_asm(&(self.line_number as u32), obj_path){
-                    Some(res)=>Some(res?),
-                    None=>None,
+                    Some(res)=>{
+                        // eprintln!("LOAD_DEBUG found something");
+                        Some(res?)
+                    }
+                    ,
+                    None=>{
+                        // eprintln!("LOAD_DEBUG found nothing!!!");
+                        None
+                    },
                 };
+
                 self.debug_info = Some(ans);
                 Ok(self.debug_info.unwrap())
             }
@@ -704,7 +714,10 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
 
 
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
-    
+    // asm_items.push(ListItem::new(vec![Spans::from(
+    //     format!("currently holding {} items",state.selected_asm.len())
+    // )]));
+
     let start_key = state.selected_asm
     .range(..state.cur_asm)
     .rev()
@@ -845,7 +858,8 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
                 DirResult::Exit => return Ok(()),
                 DirResult::File(mut file_state) => {
                     let path: Arc<Path> =
-                        fs::canonicalize(Path::new(&file_state.file_path))?.into();
+                        Path::new(&file_state.file_path).into();
+                        // fs::canonicalize(Path::new(&file_state.file_path))?.into();
                     let code_file = code_files.get_source_file(path,true)?;
                     let res = Self::walk_file_loop(
                         &mut self.last_frame,
