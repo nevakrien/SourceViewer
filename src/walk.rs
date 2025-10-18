@@ -10,14 +10,14 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use std::collections::BTreeMap;
-use std::io::{self, BufRead};
+use std::io::{self};
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use std::{fs, fs::File};
+use std::fs;
 use tui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -662,7 +662,7 @@ pub fn render_file_asm_viewer(
         // Layout: Split vertically for source and assembly (if selected)
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+            .constraints([Constraint::Ratio(47,100), Constraint::Percentage(0)].as_ref())
             .split(size);
 
         // Calculate max visible lines based on the height of the first part of the layout
@@ -744,7 +744,7 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
     let start_key = state.selected_asm
     .range(..state.cur_asm)
     .rev()
-    .take(4)
+    .take((1+max_visible_lines*2)/3)
     .fold(state.cur_asm,|_,(a,_)| *a);
 
     let mut iter = state.selected_asm
