@@ -833,11 +833,11 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "Assembly View:",
         "  w          - Scroll assembly view up",
         "  s          - Scroll assembly view down",
-        "  l          - Toggle line numbers",
         "",
         "Other Commands:",
         "  h          - Show this",
         "  q          - Quit file viewer",
+        "  l          - Toggle line numbers",
         "  Esc        - Return to directory view",
     ];
 
