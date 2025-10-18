@@ -34,10 +34,10 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
     let mut code_files = CodeRegistry::new(&mut registry, &code_arena);
 
     println!("visiting file {:?}", &*obj_file);
-    code_files
-        .visit_machine_file(obj_file.clone())?
-        .get_lines_map()?;
-
+    let machine_file = code_files.visit_machine_file(obj_file.clone())?;
+    machine_file.get_lines_map()?;
+    machine_file.get_capstone()?;
+    
     // let mut terminal = create_terminal()?;
     // let _cleanup = TerminalCleanup;
     let mut state = GlobalState::start()?;
@@ -286,6 +286,7 @@ pub fn view_source_command(
 
     if walk {
         machine_file.get_lines_map()?;
+        machine_file.get_capstone()?;
 
         let file_path = match &selections[0] {
             FileSelection::Index(i) => {
@@ -330,6 +331,7 @@ pub fn view_source_command(
                 &mut last_frame,
                 &mut session.terminal,
                 &mut file_state,
+                &mut code_files,
                 code_file,
                 obj_file.clone(),
             )?;

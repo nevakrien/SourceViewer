@@ -96,13 +96,7 @@ fn dissasm(
     let disasm = cs.disasm_all(data, address)?;
     let mut instructions = Vec::new();
     for (_serial_number, insn) in disasm.iter().enumerate() {
-        instructions.push(InstructionDetail {
-            // serial_number,
-            address: insn.address(),
-            mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
-            op_str: insn.op_str().unwrap_or("unknown").into(),
-            size: insn.len(),
-        });
+        instructions.push(insn.into());
     }
     Ok(instructions.into())
 }
@@ -130,13 +124,7 @@ pub fn map_dissasm(
 
 
         for (_serial_number, insn) in disasm.iter().enumerate() {
-            f(InstructionDetail {
-                // serial_number,
-                address: insn.address(),
-                mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
-                op_str: insn.op_str().unwrap_or("unknown").into(),
-                size: insn.len(),
-            })?;
+            f(insn.into())?;
         } 
     }
 
@@ -144,6 +132,10 @@ pub fn map_dissasm(
 }
 
 impl CodeSection<'_> {
+    pub fn get_end(&self)->u64{
+        self.address+self.data.len() as u64
+    }
+
     pub fn get_existing_asm(&self) -> Arc<[InstructionDetail]> {
         self.asm.get().unwrap().clone()
     }
@@ -197,6 +189,17 @@ pub struct InstructionDetail {
     pub size: usize,
 }
 
+impl From<&capstone::Insn<'_>> for InstructionDetail{
+fn from(insn: &capstone::Insn<'_>) -> Self { 
+    InstructionDetail {
+        // serial_number,
+        address: insn.address(),
+        mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
+        op_str: insn.op_str().unwrap_or("unknown").into(),
+        size: insn.len(),
+    }}
+}
+
 impl InstructionDetail {
     pub fn get_end(&self)->u64{
         self.address+self.size as u64
@@ -204,6 +207,23 @@ impl InstructionDetail {
 }
 
 impl<'a> MachineFile<'a> {
+    pub fn dissasm_address(&self,target:u64)->Result<Option<InstructionDetail>,Box<dyn Error>>{
+        for s in &self.sections {
+            let Section::Code(code) = s else {
+                continue;
+            };
+
+            if target < code.address || target >= code.get_end(){
+                continue;
+            }
+
+            let offset = (target - code.address) as usize;
+            let data = &code.data[offset..];
+            let cs = self.get_capstone()?;
+            return Ok(cs.disasm_count(data,target,1)?.first().map(|x| x.into()));
+        }
+        Ok(None)
+    }
     pub fn get_lines_map(&self) -> Result<Arc<FileMap<'a>>, Box<dyn Error>> {
         self.file_lines
             .get_or_try_init(|| {

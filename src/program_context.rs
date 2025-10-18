@@ -368,6 +368,10 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
     ) -> Result<&mut MachineFile<'data>, Box<dyn Error>> {
         self.asm.get_machine(path)
     }
+
+    pub fn get_existing_machine(&self,path:&Path)->Option<&MachineFile<'data>>{
+        self.asm.map.get(path).map(|x| x.as_ref().ok())?
+    }
 }
 
 // pub fn format_inst_debug<'a, 'b: 'a, 'c>(

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::error::Error;
 use crate::file_parser::InstructionDetail;
 use crate::program_context::CodeFile;
@@ -47,7 +48,7 @@ pub struct GlobalState<'arena> {
 
     show_lines: bool,
 
-    selected_asm: BTreeMap<u64, (&'arena InstructionDetail, Rc<str>)>, //address -> (instructions,line text)
+    selected_asm: BTreeMap<u64, (Cow<'arena,InstructionDetail> , Rc<str>)>, //address -> (instructions,line text)
     // asm_cursor: usize,
     cur_asm: u64,
 
@@ -91,7 +92,7 @@ impl<'arena> GlobalState<'arena> {
             Some(data) => {
                 // let current_addres = self
                 self.selected_asm
-                    .extend(data.iter().map(|x| (x.address, (x, text.clone()))));
+                    .extend(data.iter().map(|x| (x.address, (Cow::Borrowed(x), text.clone()))));
             }
         }
     }
@@ -112,35 +113,84 @@ impl<'arena> GlobalState<'arena> {
     #[inline(always)]
     fn cur_asm_range(
         &self,
-    ) -> std::collections::btree_map::Range<'_, u64, (&'arena InstructionDetail, Rc<str>)> {
+    ) -> std::collections::btree_map::Range<'_, u64, (Cow<'arena,InstructionDetail>, Rc<str>)> {
         // Start from asm_cursor and get all subsequent entries
         self.selected_asm.range(self.cur_asm..)
     }
 
-    #[inline]
+    // #[inline]
+    // fn asm_up(&mut self) {
+    //     // Move to the previous address if possible
+    //     if let Some(prev_address) = self
+    //         .selected_asm
+    //         .range(..self.cur_asm)
+    //         .next_back()
+    //         .map(|(addr, _)| *addr)
+    //     {
+    //         self.cur_asm = prev_address;
+    //     }
+    // }
+     #[inline]
     fn asm_up(&mut self) {
         // Move to the previous address if possible
-        if let Some(prev_address) = self
+        if let Some((_,(prev_ins,_))) = self
             .selected_asm
             .range(..self.cur_asm)
             .next_back()
-            .map(|(addr, _)| *addr)
-        {
-            self.cur_asm = prev_address;
+        {   
+            if prev_ins.get_end()==self.cur_asm{
+                self.cur_asm=prev_ins.address;
+            }else{
+                self.cur_asm=prev_ins.get_end();
+            }
         }
     }
 
-    #[inline]
+    // #[inline]
+    // fn asm_down(&mut self) {
+    //     // Move to the next address if possible
+    //     if let Some(next_address) = self
+    //         .selected_asm
+    //         .range((self.cur_asm + 1)..)
+    //         .next()
+    //         .map(|(addr, _)| *addr)
+    //     {
+    //         self.cur_asm = next_address;
+    //     }
+    // }
+
+     #[inline]
     fn asm_down(&mut self) {
-        // Move to the next address if possible
-        if let Some(next_address) = self
+        if let Some((addr,(ins,_))) = self
             .selected_asm
-            .range((self.cur_asm + 1)..)
+            .range((self.cur_asm)..)
             .next()
-            .map(|(addr, _)| *addr)
         {
-            self.cur_asm = next_address;
-        }
+            if *addr == self.cur_asm{
+                self.cur_asm = ins.get_end();
+            }else{
+                self.cur_asm=*addr;
+            }
+        }   
+    }
+
+    #[inline]
+    fn asm_toggle(&mut self,obj_path:&Path,code_files: &mut CodeRegistry<'_, 'arena>,) -> Result<(),Box<dyn Error>>{
+        use std::collections::btree_map::Entry;
+        match self.selected_asm.entry(self.cur_asm) {
+            Entry::Vacant(v) => {
+                let machine_file = code_files.get_existing_machine(obj_path).unwrap();
+                let Some(raw_asm) = machine_file.dissasm_address(self.cur_asm)? else {return Ok(())};
+                v.insert((Cow::Owned(raw_asm),"<?>".into()));
+                // self.asm_down();
+            },
+            Entry::Occupied(o) => {
+                o.remove();
+                self.asm_up();
+            },
+        };
+
+        Ok(())
     }
 
     // #[inline(always)]
@@ -286,7 +336,9 @@ pub enum DirResult<'me, 'arena> {
 
 pub fn handle_directory_input<'me, 'arena>(
     state: &'me mut GlobalState<'arena>,
-) -> Result<DirResult<'me, 'arena>, Box<dyn std::error::Error>> {
+    code_files:&mut CodeRegistry<'_,'arena>,
+    obj_path: Arc<Path>,
+) -> Result<DirResult<'me, 'arena>, Box<dyn Error>> {
     match event::read()? {
         Event::Key(KeyEvent { code, kind, .. }) => {
             if crossterm::event::KeyEventKind::Release == kind {
@@ -299,7 +351,7 @@ pub fn handle_directory_input<'me, 'arena>(
                     return Ok(DirResult::Exit);
                 }
                 KeyCode::Char('h') => {
-                    state.help_toggle = true;
+                    state.help_toggle = !state.help_toggle;
                 }
                 KeyCode::Down => {
                     let i = match state.dir_list_state.selected() {
@@ -325,6 +377,7 @@ pub fn handle_directory_input<'me, 'arena>(
                 KeyCode::Char('w') => state.asm_up(),
 
                 KeyCode::Char('s') => state.asm_down(),
+                KeyCode::Char(' ') => state.asm_toggle(&obj_path,code_files)?,
 
                 KeyCode::Enter => {
                     if let Some(i) = state.dir_list_state.selected() {
@@ -405,6 +458,7 @@ pub enum FileResult {
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
 pub fn handle_file_input<'arena>(
     state: &mut FileState<'_, 'arena>,
+    code_files:&mut CodeRegistry<'_,'arena>,
     code_file: &'arena CodeFile,
     obj_path: Arc<Path>,
 ) -> Result<FileResult,Box<dyn Error>> {
@@ -431,6 +485,8 @@ pub fn handle_file_input<'arena>(
                 }
                 KeyCode::Char('w') => state.global.asm_up(),
                 KeyCode::Char('s') => state.global.asm_down(),
+                KeyCode::Char(' ') => state.global.asm_toggle(&obj_path,code_files)?,
+
                 KeyCode::Up => {
                     if state.cursor > 0 {
                         state.cursor -= 1;
@@ -725,7 +781,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
             let terminal = &mut self.terminal;
             let state = &mut self.state;
 
-            match handle_directory_input(state)? {
+            match handle_directory_input(state,code_files,obj_file.clone())? {
                 DirResult::KeepGoing => {}
                 DirResult::Exit => return Ok(()),
                 DirResult::File(mut file_state) => {
@@ -736,6 +792,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
                         &mut self.last_frame,
                         terminal,
                         &mut file_state,
+                        code_files,
                         code_file,
                         obj_file.clone(),
                     )?;
@@ -754,6 +811,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
         last_frame: &mut Instant,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         file_state: &mut FileState<'_, 'arena>,
+        code_files: &mut CodeRegistry<'_, 'arena>,
         code_file: &'arena CodeFile,
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
@@ -761,7 +819,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
             wait_frame_start(last_frame)?;
 
             render_file_asm_viewer(terminal, file_state)?;
-            let res = handle_file_input(file_state, code_file, obj_file.clone())?;
+            let res = handle_file_input(file_state,code_files, code_file, obj_file.clone())?;
             match res {
                 FileResult::KeepGoing => {}
                 _ => return Ok(res),
@@ -833,6 +891,8 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "Assembly View:",
         "  w          - Scroll assembly view up",
         "  s          - Scroll assembly view down",
+        "  Space      - Toggle selection of the current address",
+        "              and load/unload associated assembly",
         "",
         "Other Commands:",
         "  h          - Show this",
@@ -859,6 +919,8 @@ pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "Assembly View:",
         "  w          - Scroll assembly view up",
         "  s          - Scroll assembly view down",
+        "  Space      - Toggle selection of the current address",
+        "              and load/unload associated assembly",
         "",
         "Other Commands:",
         "  h          - Show this help",
