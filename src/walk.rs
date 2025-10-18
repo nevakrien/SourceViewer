@@ -42,7 +42,7 @@ impl Drop for TerminalCleanup {
 
 pub struct GlobalState<'arena> {
     current_dir: Arc<Path>,
-    original_dir: Arc<Path>,
+    // original_dir: Arc<Path>,
     pub dir_list_state: ListState,
     dir_entries: Box<[std::fs::DirEntry]>,
 
@@ -63,7 +63,7 @@ impl<'arena> GlobalState<'arena> {
         let dir_entries = fs::read_dir(&*path)?.filter_map(Result::ok).collect();
         let mut state = Self {
             current_dir: path.clone(),
-            original_dir: path,
+            // original_dir: path,
             dir_list_state: ListState::default(),
             // mode: Mode::Dir,
             // file_content: Vec::new(),
@@ -432,9 +432,12 @@ pub fn handle_directory_input<'me, 'arena>(
                     }
                 }
                 KeyCode::Esc => {
-                    if state.current_dir != state.original_dir {
+                    // if state.current_dir != state.original_dir {
+                        {
                         if let Some(parent) = state.current_dir.parent() {
-                            state.current_dir = parent.into();
+                            let parent:Arc<Path> = parent.into();
+                            state.current_dir = parent.clone();
+                            state.dir_entries = fs::read_dir(parent)?.filter_map(Result::ok).collect();
                             state.dir_list_state.select(Some(0));
                         }
                     }
