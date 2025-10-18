@@ -199,7 +199,7 @@ impl<'arena> GlobalState<'arena> {
                 {
                     let path = Path::new(file).into();
                     let code_file = code_files.get_source_file(path,false)?;
-                    let text = code_file.text.lines().nth(line.saturating_sub(1) as usize);
+                    let text = code_file.get_line(line);
                     match text {
 
                         Some(t)=>v.insert((Cow::Owned(raw_asm),sanitise(t.trim_start().to_string()).into())),

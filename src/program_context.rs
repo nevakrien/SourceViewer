@@ -205,6 +205,7 @@ impl<'a> LazeyAsm<'a>{
 // #[derive(PartialEq)]
 pub struct CodeFile<'a> {
     pub text: String,
+    line_map:OnceCell<HashMap<u32,(usize,usize)>>,//line->byte span
     asm: BTreeMap<u32, HashMap<Arc<Path>, LazeyAsm<'a>>>, //line -> instruction
     pub errors: Vec<(StackedError, Option<Arc<Path>>)>,
 }
@@ -214,6 +215,7 @@ impl<'a> CodeFile<'a> {
         let text = fs::read_to_string(path)?;
         Ok(CodeFile {
             text,
+            line_map:OnceCell::new(),
             asm: BTreeMap::new(),
             errors: Vec::new(),
         })
@@ -236,6 +238,23 @@ impl<'a> CodeFile<'a> {
         self.asm.get(line)?.get(&obj_path).map(|x| x.make_asm()) //.unwrap_or(&[])
     }
 
+    #[inline]
+    pub fn get_line(&self,line:u32)->Option<&str>{
+        let (start,end) = self.get_line_map().get(&line)?;
+        let slice = &self.text.as_bytes()[*start..*end];
+        Some(std::str::from_utf8(slice).unwrap())
+    }
+
+    fn get_line_map(&self)->&HashMap<u32,(usize,usize)>{
+        self.line_map.get_or_init(||{
+            self.text.lines().enumerate().map(|(i,t)|{
+                let number = i as u32 + 1;
+                let text_start = t.as_ptr().addr()-self.text.as_ptr().addr();
+                let text_end = text_start+t.len();
+                (number,(text_start,text_end))
+            }).collect()
+        })
+    }
 
     fn populate(&mut self, asm: &mut FileRegistry<'a>, path: Arc<Path>){
         // Helper closure that runs a fallible block, catches any Err,
