@@ -37,7 +37,7 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
     let machine_file = code_files.visit_machine_file(obj_file.clone())?;
     machine_file.get_lines_map()?;
     machine_file.get_capstone()?;
-    
+
     // let mut terminal = create_terminal()?;
     // let _cleanup = TerminalCleanup;
     let mut state = GlobalState::start()?;
@@ -315,17 +315,18 @@ pub fn view_source_command(
             .ok_or("No parent dir to path")?
             .to_path_buf();
 
-        let mut state = GlobalState::start_from(parent)?;
+        let mut state = GlobalState::start_from(parent.into())?;
         let mut session = TerminalSession::new(&mut state)?;
+
+        let code_file = code_files.get_source_file(file_path.into(),true)?;
 
         //file
         {
-            let mut file_state = crate::walk::load_file(session.state, file_path)?;
+            let mut file_state = crate::walk::load_file(session.state, file_path,code_file)?;
             if let Some(FileSelection::Index(i)) = selections.get(1) {
                 file_state.file_scroll = i.saturating_sub(1);
                 file_state.cursor = i.saturating_sub(1);
             };
-            let code_file = code_files.get_source_file(file_path.into(),true)?;
             let mut last_frame = Instant::now();
             let res = TerminalSession::walk_file_loop(
                 &mut last_frame,

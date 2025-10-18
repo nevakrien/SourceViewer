@@ -41,8 +41,8 @@ impl Drop for TerminalCleanup {
 }
 
 pub struct GlobalState<'arena> {
-    current_dir: PathBuf,
-    original_dir: PathBuf,
+    current_dir: Arc<Path>,
+    original_dir: Arc<Path>,
     pub dir_list_state: ListState,
     dir_entries: Box<[std::fs::DirEntry]>,
 
@@ -57,9 +57,9 @@ pub struct GlobalState<'arena> {
 
 impl<'arena> GlobalState<'arena> {
     pub fn start() -> Result<Self, Box<dyn std::error::Error>> {
-        GlobalState::start_from(PathBuf::from("."))
+        GlobalState::start_from(PathBuf::from(".").into())
     }
-    pub fn start_from(path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn start_from(path: Arc<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let dir_entries = fs::read_dir(&*path)?.filter_map(Result::ok).collect();
         let mut state = Self {
             current_dir: path.clone(),
@@ -387,20 +387,21 @@ pub fn handle_directory_input<'me, 'arena>(
 
                 KeyCode::Enter => {
                     if let Some(i) = state.dir_list_state.selected() {
-                        let path = state.dir_entries[i].path();
+                        let path:Arc<Path> = state.dir_entries[i].path().into();
                         if path.is_dir() {
                             state.current_dir = path;
                             load_dir(state)?;
                             state.dir_list_state.select(Some(0));
                         } else if path.is_file() {
-                            return Ok(DirResult::File(load_file(state, &path)?));
+                            let code_file = code_files.get_source_file(path.clone(),false)?;
+                            return Ok(DirResult::File(load_file(state,&path, code_file)?));
                         }
                     }
                 }
                 KeyCode::Esc => {
                     if state.current_dir != state.original_dir {
                         if let Some(parent) = state.current_dir.parent() {
-                            state.current_dir = parent.to_path_buf();
+                            state.current_dir = parent.into();
                             state.dir_list_state.select(Some(0));
                         }
                     }
@@ -443,9 +444,10 @@ pub fn handle_directory_input<'me, 'arena>(
 pub fn load_file<'b, 'arena>(
     global: &'b mut GlobalState<'arena>,
     path: &Path,
+    code_file:&CodeFile
 ) -> Result<FileState<'b, 'arena>, Box<dyn std::error::Error>> {
     Ok(FileState {
-        file_content: read_file_lines(path)?,
+        file_content: read_file_lines(code_file),
         file_path: path.display().to_string(),
         file_scroll: 0,
         cursor: 0,
@@ -575,16 +577,16 @@ fn sanitise(mut s: String) -> String {
     s
 }
 
-fn read_file_lines(path: &Path) -> io::Result<Vec<Line<'static>>> {
-    let file = File::open(path)?;
-    let reader = io::BufReader::new(file);
+fn read_file_lines(code_file:&CodeFile) -> Vec<Line<'static>> {
+    // let file = File::open(path)?;
+    // let reader = io::BufReader::new(file);
 
-    Ok(reader
+    code_file
+        .text
         .lines()
-        .map_while(Result::ok)
         .enumerate()
-        .map(|(i, s)| Line::new(sanitise(s).into(), i + 1))
-        .collect())
+        .map(|(i, s)| Line::new(sanitise(s.to_string()).into(), i + 1))
+        .collect()
 }
 
 // Helper function to create a line without a line number and styling
@@ -700,7 +702,6 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             .add_modifier(Modifier::BOLD),
     ));
 
-    let mut prev_end = 0u64;
 
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
     
@@ -845,7 +846,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
                 DirResult::File(mut file_state) => {
                     let path: Arc<Path> =
                         fs::canonicalize(Path::new(&file_state.file_path))?.into();
-                    let code_file = code_files.get_source_file(path,false)?;
+                    let code_file = code_files.get_source_file(path,true)?;
                     let res = Self::walk_file_loop(
                         &mut self.last_frame,
                         terminal,

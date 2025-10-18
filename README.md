@@ -5,6 +5,9 @@ the goal is to allow viewing dissasmblies from the perspective of the source fil
 
 ![example of walk](https://github.com/nevakrien/SourceViewer/raw/main/new_example_cpp.png)
 
+
+note the code in the repo is still very unstable
+
 ## Installation
 
 You can install **SourceViewer** using **Cargo** (recommended) or download prebuilt binaries from the [Releases page](https://github.com/nevakrien/SourceViewer/releases).
