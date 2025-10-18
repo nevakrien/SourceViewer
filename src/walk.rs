@@ -110,13 +110,19 @@ impl<'arena> GlobalState<'arena> {
         );
     }
 
-    #[inline(always)]
-    fn cur_asm_range(
-        &self,
-    ) -> std::collections::btree_map::Range<'_, u64, (Cow<'arena,InstructionDetail>, Rc<str>)> {
-        // Start from asm_cursor and get all subsequent entries
-        self.selected_asm.range(self.cur_asm..)
-    }
+    // #[inline(always)]
+    // fn cur_asm_range(
+    //     &self,
+    // ) -> std::collections::btree_map::Range<'_, u64, (Cow<'arena,InstructionDetail>, Rc<str>)> {
+    //     // Start from asm_cursor and get all subsequent entries
+    //     let start_key = self.selected_asm
+    //     .range(..self.cur_asm)
+    //     .rev()
+    //     .take(2)
+    //     .fold(self.cur_asm,|_,(a,_)| *a);
+
+    //     self.selected_asm.range(start_key..)
+    // }
 
     // #[inline]
     // fn asm_up(&mut self) {
@@ -182,7 +188,7 @@ impl<'arena> GlobalState<'arena> {
                 let machine_file = code_files.get_existing_machine(obj_path).unwrap();
                 let Some(raw_asm) = machine_file.dissasm_address(self.cur_asm)? else {return Ok(())};
                 v.insert((Cow::Owned(raw_asm),"<?>".into()));
-                // self.asm_down();
+                self.asm_down();
             },
             Entry::Occupied(o) => {
                 o.remove();
@@ -676,6 +682,15 @@ pub fn render_file_asm_viewer(
     Ok(())
 }
 
+fn maybe_highlight(h:bool,style:Style)->Style{
+   if h {
+        style.bg(Color::DarkGray)
+        .add_modifier(Modifier::BOLD)
+    }else{
+        style
+    }
+}
+
 fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> List<'a>
 {
     let asm_block = Block::default().borders(Borders::ALL).title(Span::styled(
@@ -688,21 +703,41 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
     let mut prev_end = 0u64;
 
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
+    
+    let start_key = state.selected_asm
+    .range(..state.cur_asm)
+    .rev()
+    .take(4)
+    .fold(state.cur_asm,|_,(a,_)| *a);
 
-    for (ins, text) in state
-        .cur_asm_range()
-        .map(|(_, v)| v.clone())
-        .take(max_visible_lines)
-    {
-        if ins.address > prev_end {
-            asm_items.push(
-                ListItem::new(vec![Spans::from("...")]).style(Style::default().fg(Color::Red)),
-            )
-        }
-        prev_end = ins.get_end();
+    let mut iter = state.selected_asm
+        .range(start_key..)
+        .peekable();
         
+    let make_dots = |h:bool|{
+        ListItem::new(vec![Spans::from("...")]).style(
+            maybe_highlight(
+                h,
+                Style::default().fg(Color::Red)
+            )
+        )
+    };
 
-        //print
+    match iter.peek() {
+        Some((0,_)) =>{},
+        Some(_)=>{
+            asm_items.push(make_dots(false));
+        }
+        None=>{
+            asm_items.push(make_dots(true));
+        }
+    }
+
+    while let Some((_,(ins,text))) = iter.next() {
+        if asm_items.len() >= max_visible_lines {
+            break;
+        }
+
         let formatted_instruction = format!(
             "{:#010x}: {:<6} {:<30} {:<30}",
 
@@ -714,9 +749,32 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
 
         asm_items.push(
             ListItem::new(vec![Spans::from(formatted_instruction)])
-                .style(Style::default().fg(Color::Cyan)),
-        )
+                .style(
+                    maybe_highlight(
+                        ins.address==state.cur_asm,
+                        Style::default().fg(Color::Cyan)
+                    )
+                ),
+        );
+
+        if asm_items.len() >= max_visible_lines {
+            break;
+        }
+
+        let Some((next_address,_)) = iter.peek() else {
+            let selected = ins.get_end()<=state.cur_asm;
+            asm_items.push(make_dots(selected));
+            break;
+        }; 
+
+        let missing_range = ins.get_end()..**next_address;
+        if !missing_range.is_empty() {
+            let selected = missing_range.contains(&state.cur_asm);
+            asm_items.push(make_dots(selected));
+        }
     }
+
+    
 
     List::new(asm_items).block(asm_block)
     // .highlight_style(Style::default()
@@ -901,7 +959,7 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "  Esc        - Return to directory view",
     ];
 
-    render_popup(frame, "Help", &help_content, 50, 50); // 50% width, 50% height
+    render_popup(frame, "Help", &help_content, 80, 80); // 80% width, 80% height
 }
 
 pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
@@ -927,5 +985,5 @@ pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "  q          - Quit the application",
     ];
 
-    render_popup(frame, "Help", &help_content, 50, 50); // 50% width, 50% height
+    render_popup(frame, "Help", &help_content, 80, 80); // 80% width, 80% height
 }
