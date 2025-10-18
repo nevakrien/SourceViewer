@@ -186,8 +186,31 @@ impl<'arena> GlobalState<'arena> {
         match self.selected_asm.entry(self.cur_asm) {
             Entry::Vacant(v) => {
                 let machine_file = code_files.get_existing_machine(obj_path).unwrap();
+                let ctx = machine_file.get_addr2line()?;
+
                 let Some(raw_asm) = machine_file.dissasm_address(self.cur_asm)? else {return Ok(())};
-                v.insert((Cow::Owned(raw_asm),"<?>".into()));
+                
+                if let Some(addr2line::Location{
+                    file:Some(file),
+                    line:Some(line),
+                    ..
+                }) = ctx.find_location(raw_asm.address)?
+
+                {
+                    let path = Path::new(file).into();
+                    let code_file = code_files.get_source_file(path,false)?;
+                    let text = code_file.text.lines().nth(line.saturating_sub(1) as usize);
+                    match text {
+
+                        Some(t)=>v.insert((Cow::Owned(raw_asm),sanitise(t.trim_start().to_string()).into())),
+                        None=>v.insert((Cow::Owned(raw_asm),"<?>".into())),
+                    };
+
+                }else{
+                    v.insert((Cow::Owned(raw_asm),"<?>".into()));
+                }
+
+                // Line::new(sanitise())
                 self.asm_down();
             },
             Entry::Occupied(o) => {
