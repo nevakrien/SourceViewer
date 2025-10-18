@@ -238,7 +238,7 @@ impl<'a> MachineFile<'a> {
                         continue;
                     };
 
-                    let end_address = code_section.address+code_section.data.len() as u64;
+                    let end_address = code_section.address+code_section.data.len() as u64;//might need a -1? addr2line arent the most clear about this
                     let mut iter = context.find_location_range(code_section.address,end_address)?;
                     let mut prev_end = code_section.address;
 
@@ -256,7 +256,13 @@ impl<'a> MachineFile<'a> {
                         }
 
                         prev_end = low+size;
-                        let start_idx =(low-code_section.address)as usize;
+                        let start_idx =(low-code_section.address) as usize;
+                        if start_idx.saturating_add(size.saturating_sub(1) as usize) >= code_section.data.len() {
+                            return Err("dwarf info ordered a bad read (out of section)".into());
+                        }
+
+
+
                         let data = &code_section.data[start_idx..][..size as usize];
 
                         let cur_range = CodeRange{
@@ -387,7 +393,7 @@ fn slow_compile(ans: &mut MachineFile, arch: Architecture) -> Result<(), Box<dyn
     Ok(())
 }
 
-fn get_first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
+fn saturating_sub(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
     let mut iter = ctx.find_location_range(start,end)?;
     if let Some((start,_,_)) = FallibleIterator::next(&mut iter)?{
         Ok(Some(start))
