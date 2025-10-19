@@ -132,8 +132,8 @@ pub fn map_dissasm(
 }
 
 impl CodeSection<'_> {
-    pub fn get_end(&self)->u64{
-        self.address+self.data.len() as u64
+    pub fn get_high(&self)->u64{
+        self.address+self.data.len().saturating_sub(1) as u64
     }
 
     pub fn get_existing_asm(&self) -> Arc<[InstructionDetail]> {
@@ -213,7 +213,7 @@ impl<'a> MachineFile<'a> {
                 continue;
             };
 
-            if target < code.address || target >= code.get_end(){
+            if target < code.address || target >= code.get_high(){
                 continue;
             }
 
@@ -238,7 +238,7 @@ impl<'a> MachineFile<'a> {
                         continue;
                     };
 
-                    let end_address = code_section.address+code_section.data.len() as u64;//might need a -1? addr2line arent the most clear about this
+                    let end_address = code_section.get_high();
                     let mut iter = context.find_location_range(code_section.address,end_address)?;
                     let mut prev_end = code_section.address;
 
@@ -393,8 +393,8 @@ fn slow_compile(ans: &mut MachineFile, arch: Architecture) -> Result<(), Box<dyn
     Ok(())
 }
 
-fn saturating_sub(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
-    let mut iter = ctx.find_location_range(start,end)?;
+fn first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
+    let mut iter = ctx.find_location_range(start,end-1)?;
     if let Some((start,_,_)) = FallibleIterator::next(&mut iter)?{
         Ok(Some(start))
     }else{

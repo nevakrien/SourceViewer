@@ -218,7 +218,7 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
                 continue;
             };
 
-            let mut locs = ctx.find_location_range(code.address,code.address+code.data.len() as u64)?;
+            let mut locs = ctx.find_location_range(code.address,code.get_high())?;
             while let Some((_,_,loc)) =FallibleIterator::next(&mut locs)?{
                 if let Some(file) = loc.file{
                     source_files.insert(file.into());
@@ -272,7 +272,7 @@ pub fn view_source_command(
             continue;
         };
 
-        let mut locs = ctx.find_location_range(code.address,code.address+code.data.len() as u64)?;
+        let mut locs = ctx.find_location_range(code.address,code.get_high())?;
         while let Some((_,_,loc)) =FallibleIterator::next(&mut locs)?{
             if let Some(file) = loc.file{
                 source_files_set.insert(file.into());
