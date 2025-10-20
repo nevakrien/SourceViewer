@@ -8,7 +8,12 @@ repository = "https://github.com/nevakrien/SourceViewer"
 readme = "README.md"
 keywords = ["CLI", "debug", "DWARF", "binary", "analysis"]
 categories = ["command-line-utilities"]
-
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE*",
+    "src/**/*",
+]
 [[bin]]
 name = "SourceViewer"
 path = "src/main.rs"
