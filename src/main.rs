@@ -24,7 +24,7 @@ fn main() -> ExitCode {
     apply_color_mode(cli.get_color());
 
     let res = match cli.command {
-        Commands::Walk { opts } => walk_command(opts.bin.into()),
+        Commands::Walk { opts,file,line } => walk_command(opts.bin.into(),file,line),
         Commands::Sections { opts } => sections_command(opts.bins),
         Commands::Lines {
             opts,

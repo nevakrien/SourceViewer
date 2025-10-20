@@ -1,3 +1,7 @@
+use clap::builder::ValueParserFactory;
+use clap::builder::TypedValueParser;
+use std::error::Error;
+use clap::builder::OsStr;
 use clap::builder::ValueParser;
 use clap::CommandFactory;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -113,6 +117,7 @@ pub struct ViewSource {
     pub selections: Vec<FileSelection>,
 }
 
+
 /// Top-level CLI
 #[derive(Parser, Debug)]
 #[command(
@@ -150,6 +155,12 @@ pub enum Commands {
     Walk {
         #[command(flatten)]
         opts: SingleBinOpts,
+
+        #[arg(help="file path to start from")]
+        file:Option<PathBuf>,
+
+        #[arg(help="line numer to start from")]
+        line:Option<usize>,
     },
 
     #[command(about = "Dumps sections information for each file")]
@@ -203,7 +214,8 @@ pub enum Commands {
 impl Commands {
     pub fn get_color(&self) -> ColorMode {
         match self {
-            Commands::Walk { opts } | Commands::ViewSource(ViewSource { opts, .. }) => opts.color,
+            Commands::Walk{opts,..}|
+            Commands::ViewSource(ViewSource { opts, .. }) => opts.color,
             Commands::Sections { opts }
             | Commands::Lines { opts, .. }
             | Commands::ViewSources { opts }

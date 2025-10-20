@@ -1,3 +1,4 @@
+use crate::walk;
 use crate::file_parser::InstructionDetail;
 use fallible_iterator::FallibleIterator;
 use crate::args::FileSelection;
@@ -27,7 +28,7 @@ use crate::println;
 
 // use crate::program_context::AddressFileMapping;
 
-pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn walk_command(obj_file: Arc<Path>,file:Option<PathBuf>,line:Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
     let asm_arena = Arena::new();
     let code_arena = Arena::new();
     let mut registry = FileRegistry::new(&asm_arena);
@@ -42,6 +43,33 @@ pub fn walk_command(obj_file: Arc<Path>) -> Result<(), Box<dyn std::error::Error
     // let _cleanup = TerminalCleanup;
     let mut state = GlobalState::start()?;
     let mut session = TerminalSession::new(&mut state)?;
+
+    if let Some(path) = file {
+        let path:Arc<Path> = fs::canonicalize(path)?.into();
+        let code_file = code_files
+            .get_source_file(path.clone(), true)
+            .map_err(|e| format!("Failed to load source {:?}: {}", path, e))?;
+
+        let mut file_state = walk::load_file(session.state, &path, code_file)?;
+        if let Some(line) = line {
+            file_state.file_scroll = line.saturating_sub(1);
+            file_state.cursor = line.saturating_sub(1);
+        }
+
+        let mut last_frame = Instant::now();
+        match TerminalSession::walk_file_loop(
+            &mut last_frame,
+            &mut session.terminal,
+            &mut file_state,
+            &mut code_files,
+            code_file,
+            obj_file.clone(),
+        )? {
+            FileResult::Exit => return Ok(()),
+            FileResult::Dir => {} // fallthrough to directory walker
+            FileResult::KeepGoing => unreachable!(),
+        }
+    }
 
     session.walk_directory_loop(&mut code_files, obj_file)
 }
