@@ -608,8 +608,9 @@ pub fn handle_file_input<'arena>(
 
 /// make text consistently renderble
 fn sanitise(mut s: String) -> String {
-    s.retain(|c| !c.is_control());
     s = s.replace('\t', "  ");
+    s.retain(|c| !c.is_control());
+    
     s
 }
 
@@ -621,12 +622,20 @@ fn read_file_lines(code_file:&CodeFile) -> Vec<Line<'static>> {
         .text
         .lines()
         .enumerate()
-        .map(|(i, s)| Line::new(sanitise(s.to_string()).into(), i + 1))
+        .map(|(i, s)| {
+            // eprintln!("got {s:?}");
+            let s = sanitise(s.to_string());
+            // eprintln!("made {s:?}");
+
+            Line::new(s.into(), i + 1)
+        })
         .collect()
 }
 
 // Helper function to create a line without a line number and styling
 fn create_line<'a>(line: &Line, show_lines: bool) -> ListItem<'a> {
+    // eprintln!("displaying {:?}",line.content);
+
     let line_style = if line.is_selected {
         Style::default().fg(Color::Red) //.bg(Color::Rgb(50,0,0))
     } else {
