@@ -1,6 +1,5 @@
 use std::rc::Rc;
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
-use object::Architecture;
 use object::{Object, ObjectSection, SectionFlags};
 use once_cell::unsync::OnceCell;
 use std::collections::btree_map;
@@ -379,28 +378,28 @@ impl<'a> MachineFile<'a> {
     }
 }
 
-#[inline(always)]
-fn slow_compile(ans: &mut MachineFile, arch: Architecture) -> Result<(), Box<dyn Error>> {
-    let cs = create_capstone(arch)?;
-    for s in ans.sections.iter_mut() {
-        match s {
-            Section::Code(c) => {
-                c.get_asm(&cs)?;
-            }
-            _ => {}
-        }
-    }
-    Ok(())
-}
+// #[inline(always)]
+// fn slow_compile(ans: &mut MachineFile, arch: Architecture) -> Result<(), Box<dyn Error>> {
+//     let cs = create_capstone(arch)?;
+//     for s in ans.sections.iter_mut() {
+//         match s {
+//             Section::Code(c) => {
+//                 c.get_asm(&cs)?;
+//             }
+//             _ => {}
+//         }
+//     }
+//     Ok(())
+// }
 
-fn first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
-    let mut iter = ctx.find_location_range(start,end-1)?;
-    if let Some((start,_,_)) = FallibleIterator::next(&mut iter)?{
-        Ok(Some(start))
-    }else{
-        Ok(None)
-    }
-}
+// fn first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
+//     let mut iter = ctx.find_location_range(start,end-1)?;
+//     if let Some((start,_,_)) = FallibleIterator::next(&mut iter)?{
+//         Ok(Some(start))
+//     }else{
+//         Ok(None)
+//     }
+// }
 
 pub fn create_capstone(arch: object::Architecture) -> Result<Capstone, Box<dyn Error>> {
     let mut cs = match arch {

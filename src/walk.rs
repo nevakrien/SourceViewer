@@ -645,15 +645,20 @@ fn create_line<'a>(line: &Line, show_lines: bool) -> ListItem<'a> {
     let line_number_span = if show_lines {
         Span::styled(
             format!("{:<4}", line.line_number),
-            Style::default().fg(Color::Blue),
+            if line.is_selected {
+                Style::default().fg(Color::Red)
+            }
+            else{
+                Style::default().fg(Color::Blue)
+            }
         )
     } else {
         Span::raw("")
     };
 
-    let line_text = match &*line.content {
-        "" => "-".to_string(),
-        a => a.to_string(),
+    let line_text = match (&*line.content,line.is_selected) {
+        ("",true) => "-".to_string(),
+        (a,_) => a.to_string(),
     };
 
     let line_content_span = Span::styled(line_text, line_style);
