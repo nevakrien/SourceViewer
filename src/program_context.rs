@@ -1,3 +1,4 @@
+use addr2line::FrameIter;
 use once_cell::unsync::OnceCell;
 use crate::file_parser::map_dissasm;
 use capstone::Capstone;
@@ -93,18 +94,54 @@ impl<'a> FileRegistry<'a> {
 
 pub type DebugContext<'a> = addr2line::Context<EndianSlice<'a, RunTimeEndian>>;
 
+
+
+fn select_one_func<'a>(
+    mut frames: FrameIter<EndianSlice<'a, RunTimeEndian>>,
+    early_exit:bool
+) -> Option<String> {
+
+    let mut best: Option<String> = None;
+
+    while let Ok(Some(frame)) = frames.next() {
+        if let Some(raw) = frame.function {
+            if let Ok(name) = raw.demangle() {
+            // if let Ok(name) = raw.raw_name() {
+
+                match &best {
+                    None => {
+                        if early_exit{
+                            return Some(name.to_string())
+                        }
+                        best = Some(name.to_string());
+                    }
+                    Some(old) => {
+                        // shorter names are nicer
+                        if name.len() < old.len() {
+                            best = Some(name.to_string());
+                        }
+                        // we want determinsem
+                        else if *name < **old {
+                            best = Some(name.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    best
+}
+
+
 pub fn resolve_func_name(addr2line: &DebugContext, address: u64) -> Option<String> {
     // Start the frame lookup process
     let lookup_result = addr2line.find_frames(address);
 
-    let mut frames = lookup_result.skip_all_loads().ok()?;
-    while let Ok(Some(frame)) = frames.next() {
-        if let Some(name) = frame.function {
-            return name.demangle().ok().map(|s| s.to_string());
-        }
-    }
-    None
+    let frames = lookup_result.skip_all_loads().ok()?;
+    select_one_func(frames,false)
 }
+
 pub fn find_func_name<'a, 'b: 'a>(
     addr2line: &DebugContext<'a>,
     registry: &mut FileRegistry<'b>,
@@ -145,15 +182,10 @@ pub fn find_func_name<'a, 'b: 'a>(
                 // Resume the lookup with the loaded data
                 lookup_result = continuation.resume(dwo);
             }
-            LookupResult::Output(Ok(mut frames)) => {
+            LookupResult::Output(Ok(frames)) => {
                 // println!("existing case");
 
-                while let Ok(Some(frame)) = frames.next() {
-                    if let Some(name) = frame.function {
-                        return name.demangle().ok().map(|s| s.to_string());
-                    }
-                }
-                return None;
+                return select_one_func(frames,false);
             }
             LookupResult::Output(Err(_e)) => {
                 // println!("error case {}",e);

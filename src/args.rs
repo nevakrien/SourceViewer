@@ -94,13 +94,20 @@ pub struct ViewSource {
     #[command(flatten)]
     pub opts: SingleBinOpts,
 
-    #[arg(short, long, help = "Show all source files")]
+    #[arg(
+        short,
+        long,
+        help = "Show all source files",
+        // conflicts_with = "selections",
+        )]
     pub all: bool,
 
     #[arg(
         short,
         long,
-        help = "Start the walk command on the selected file optionally at a specific line"
+        help = "Start the walk command on the selected file optionally at a specific line",
+        requires = "selections",
+        // conflicts_with = "all",
     )]
     pub walk: bool,
 
