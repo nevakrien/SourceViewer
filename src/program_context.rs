@@ -98,39 +98,17 @@ pub type DebugContext<'a> = addr2line::Context<EndianSlice<'a, RunTimeEndian>>;
 
 fn select_one_func<'a>(
     mut frames: FrameIter<EndianSlice<'a, RunTimeEndian>>,
-    early_exit:bool
 ) -> Option<String> {
-
-    let mut best: Option<String> = None;
-
     while let Ok(Some(frame)) = frames.next() {
         if let Some(raw) = frame.function {
             if let Ok(name) = raw.demangle() {
-            // if let Ok(name) = raw.raw_name() {
-
-                match &best {
-                    None => {
-                        if early_exit{
-                            return Some(name.to_string())
-                        }
-                        best = Some(name.to_string());
-                    }
-                    Some(old) => {
-                        // shorter names are nicer
-                        if name.len() < old.len() {
-                            best = Some(name.to_string());
-                        }
-                        // we want determinsem
-                        else if *name < **old {
-                            best = Some(name.to_string());
-                        }
-                    }
-                }
+                //inner most function is probably the most intresting
+                return Some(name.to_string())
             }
         }
     }
 
-    best
+    None
 }
 
 
@@ -139,7 +117,7 @@ pub fn resolve_func_name(addr2line: &DebugContext, address: u64) -> Option<Strin
     let lookup_result = addr2line.find_frames(address);
 
     let frames = lookup_result.skip_all_loads().ok()?;
-    select_one_func(frames,false)
+    select_one_func(frames)
 }
 
 pub fn find_func_name<'a, 'b: 'a>(
@@ -185,7 +163,7 @@ pub fn find_func_name<'a, 'b: 'a>(
             LookupResult::Output(Ok(frames)) => {
                 // println!("existing case");
 
-                return select_one_func(frames,false);
+                return select_one_func(frames);
             }
             LookupResult::Output(Err(_e)) => {
                 // println!("error case {}",e);
