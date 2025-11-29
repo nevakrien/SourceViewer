@@ -15,7 +15,7 @@ Building from source is also an option but note that the code in the repo is sti
 
 ### Using Cargo
 ```bash
-cargo install source_viewer
+cargo install source_viewer --locked
 ```
 or
 
@@ -118,6 +118,9 @@ a very good test case is runing
 ```bash
 cargo run walk target/debug/SourceViewer
 ```
+
+compare_test.sh and diff_test.sh are a way to check aginst regressions.
+they work by using the installed version of SourceViewer and comparing it to the build version
 
 # Platforms
 this is mostly supported for unix and specifically linux/bsd because dwarf is the main format.

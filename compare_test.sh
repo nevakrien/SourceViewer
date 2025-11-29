@@ -88,7 +88,7 @@ compare_outputs() {
     fi
 }
 
-cd "$SV_CARGO_DIR"
+cd "$SV_CARGO_DIR" || exit
 
 for binpath in "${BINARIES[@]}"; do
     binpath="$(realpath "$binpath")"

@@ -38,3 +38,6 @@ lto = "thin"
 
 [profile.dev]
 panic = "abort"#gdb
+
+[profile.release]
+lto = "thin"#this might effect demangling for some weird reason

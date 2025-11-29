@@ -4,9 +4,10 @@ set -u
 SV_CARGO_DIR="$(dirname "$(realpath "$0")")"
 SV_BIN_SYS="$(command -v SourceViewer)"
 SV_BIN_CARGO="$SV_CARGO_DIR/target/release/SourceViewer"
+# SV_BIN_CARGO="$HOME/temp-source-viewer"
 
-# BIN="$SV_CARGO_DIR/sample_code/llvm-impl/small"
-BIN="$SV_CARGO_DIR/sample_code/llvm-impl/libsmall_lang.so"
+BIN="$SV_CARGO_DIR/sample_code/llvm-impl/small"
+# BIN="$SV_CARGO_DIR/sample_code/llvm-impl/libsmall_lang.so"
 BIN="$(realpath "$BIN")"
 
 COMMANDS=(
