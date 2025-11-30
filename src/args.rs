@@ -184,6 +184,12 @@ pub enum Commands {
         ignore_unknown: bool,
     },
 
+    #[command(about = "Dumps functions found in the file")]
+    Functions {
+        #[command(flatten)]
+        opts: MultiBinOpts,
+    },
+
     #[command(
 
         about = "Looks at the source code files that made the binary",
@@ -222,6 +228,7 @@ impl Commands {
             Commands::Sections { opts }
             | Commands::Lines { opts, .. }
             | Commands::ViewSources { opts }
+            | Commands::Functions { opts }
             | Commands::DwarfDump { opts } => opts.color,
         }
     }

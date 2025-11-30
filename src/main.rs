@@ -36,6 +36,9 @@ fn main() -> ExitCode {
             walk,
             selections,
         }) => view_source_command(&opts.bin, all, walk, selections),
+
+        Commands::Functions { opts } => functions_command(opts.bins),
+
         Commands::ViewSources { opts } => view_sources_command(opts.bins),
         Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
 

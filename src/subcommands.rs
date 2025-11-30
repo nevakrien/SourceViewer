@@ -1,3 +1,4 @@
+use crate::program_context::map_funcs;
 use crate::walk;
 use crate::file_parser::InstructionDetail;
 use fallible_iterator::FallibleIterator;
@@ -438,5 +439,37 @@ fn display_file_contents(file_path: &Path) -> Result<(), Box<dyn Error>> {
             println!("{}", format!("{:?} does not exist", file_path).red());
         }
     }
+    Ok(())
+}
+
+pub fn functions_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
+    let arena = Arena::new();
+    let mut registry = FileRegistry::new(&arena);
+
+    // Iterate over each file path and process it
+    for file_path in file_paths {
+        let mut seen = HashSet::new();
+
+        println!("{}", format!("functions in {:?}", file_path).green().bold());
+        let machine_file = registry.get_machine(file_path.into())?;
+        let ctx = machine_file.get_addr2line()?;
+        let cs = create_capstone(machine_file.obj.architecture())?;
+
+        for section in &machine_file.sections.clone() {
+            if let Section::Code(code_section) = section {
+
+                code_section.map_asm(&cs,&mut |ins| {
+                    map_funcs(&ctx, &mut registry, ins.address,|func|{
+                        if seen.insert(func.to_string()){
+                            println!("{} {}",seen.len().to_string().blue(),func);
+                        }
+                        Ok(())
+
+                    })
+                })?;
+            }
+        }
+    }
+
     Ok(())
 }

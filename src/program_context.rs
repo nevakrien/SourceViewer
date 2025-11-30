@@ -94,8 +94,6 @@ impl<'a> FileRegistry<'a> {
 
 pub type DebugContext<'a> = addr2line::Context<EndianSlice<'a, RunTimeEndian>>;
 
-
-
 fn select_one_func<'a>(
     mut frames: FrameIter<EndianSlice<'a, RunTimeEndian>>,
 ) -> Option<String> {
@@ -111,6 +109,21 @@ fn select_one_func<'a>(
     None
 }
 
+fn map_frame_func<'a,E>(
+    mut frames: FrameIter<EndianSlice<'a, RunTimeEndian>>,
+    mut map:impl FnMut(&str)->Result<(),E>,
+) -> Result<(),E>{
+
+    while let Ok(Some(frame)) = frames.next() {
+        if let Some(raw) = frame.function {
+            if let Ok(name) = raw.demangle() {
+                map(&name)?
+            }
+        }
+    }
+
+    Ok(())
+}
 
 pub fn resolve_func_name(addr2line: &DebugContext, address: u64) -> Option<String> {
     // Start the frame lookup process
@@ -120,11 +133,11 @@ pub fn resolve_func_name(addr2line: &DebugContext, address: u64) -> Option<Strin
     select_one_func(frames)
 }
 
-pub fn find_func_name<'a, 'b: 'a>(
-    addr2line: &DebugContext<'a>,
+fn get_func_frames<'a, 'b: 'a,'c>(
+    addr2line: &'c DebugContext<'a>,
     registry: &mut FileRegistry<'b>,
     address: u64,
-) -> Option<String> {
+) -> Option<FrameIter<'c,EndianSlice<'a, RunTimeEndian>>>{
     let mut lookup_result = addr2line.find_frames(address);
 
     loop {
@@ -163,7 +176,7 @@ pub fn find_func_name<'a, 'b: 'a>(
             LookupResult::Output(Ok(frames)) => {
                 // println!("existing case");
 
-                return select_one_func(frames);
+                return Some(frames);
             }
             LookupResult::Output(Err(_e)) => {
                 // println!("error case {}",e);
@@ -171,6 +184,28 @@ pub fn find_func_name<'a, 'b: 'a>(
                 return None;
             }
         }
+    }
+}
+
+pub fn find_func_name<'a, 'b: 'a>(
+    addr2line: &DebugContext<'a>,
+    registry: &mut FileRegistry<'b>,
+    address: u64,
+) -> Option<String> {
+    get_func_frames(addr2line,registry,address)
+    .map(select_one_func)?
+}
+
+pub fn map_funcs<'a, 'b: 'a, E>(
+    addr2line: &DebugContext<'a>,
+    registry: &mut FileRegistry<'b>,
+    address: u64,
+    map:impl FnMut(&str)->Result<(),E>,
+) -> Result<(),E> {
+    if let Some(frame) = get_func_frames(addr2line,registry,address){
+        map_frame_func(frame,map)
+    }else{
+        Ok(())
     }
 }
 
