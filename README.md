@@ -100,6 +100,17 @@ and again it can be pumped into less.
 	SourceViewer sections sample_code/build/linux_x86_64 --color | less -r
 ```
 
+# Configuration
+SourceViewer can be configured by writing to files at the system level.
+the config-paths command shows the file paths we would use on your system. if the files dont exist SourceViewer would use the default behivior.
+
+supported walk configs:
+
+	**asm_precent**: what precent of the screen should be the asm (must be an integer).
+
+# Uninstall
+just deleating the excutable should be enough. if you made config files maually you can delete them.
+
 # Limitations
 1. SourceViewer is specifically designed to be very quick to open even on larger files.
 as such sometimes errors are discovered late.
