@@ -30,6 +30,8 @@ use tui::{
 const ACTIONS_PER_SECOND: u64 = 30; // Frames per second for terminal updates
 const FRAME_MIN_TIME: Duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
 
+static LAYOUT: [Constraint; 2] = [Constraint::Ratio(47,100), Constraint::Ratio(53,100)];
+
 pub struct TerminalCleanup;
 
 impl Drop for TerminalCleanup {
@@ -338,7 +340,7 @@ pub fn render_directory(
         // Layout: Split vertically for source and assembly (if selected)
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+            .constraints(LAYOUT.as_ref())
             .split(size);
 
         let list_block = Block::default().borders(Borders::ALL).title(Span::styled(
@@ -679,7 +681,7 @@ pub fn render_file_asm_viewer(
         // Layout: Split vertically for source and assembly (if selected)
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Ratio(47,100), Constraint::Percentage(0)].as_ref())
+            .constraints(LAYOUT.as_ref())
             .split(size);
 
         // Calculate max visible lines based on the height of the first part of the layout
