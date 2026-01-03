@@ -13,7 +13,6 @@ use crossterm::execute;
 use std::collections::BTreeMap;
 use std::io::{self};
 use std::path::Path;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -60,7 +59,8 @@ pub struct GlobalState<'arena> {
 
 impl<'arena> GlobalState<'arena> {
     pub fn start() -> Result<Self, Box<dyn std::error::Error>> {
-        GlobalState::start_from(PathBuf::from(".").into())
+        //get the current dir so that .. works proper since ./.. is broken
+        GlobalState::start_from(std::env::current_dir()?.into())
     }
     pub fn start_from(path: Arc<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let dir_entries = fs::read_dir(&*path)?.filter_map(Result::ok).collect();
