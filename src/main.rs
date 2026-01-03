@@ -41,6 +41,7 @@ fn main() -> ExitCode {
 
         Commands::ViewSources { opts } => view_sources_command(opts.bins),
         Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
+        Commands::ConfigPaths { .. } => config_paths_command(),
 
     };
 

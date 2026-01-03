@@ -1,3 +1,4 @@
+use crate::config::WalkConfig;
 use std::borrow::Cow;
 use std::error::Error;
 use crate::file_parser::InstructionDetail;
@@ -30,7 +31,7 @@ use tui::{
 const ACTIONS_PER_SECOND: u64 = 30; // Frames per second for terminal updates
 const FRAME_MIN_TIME: Duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
 
-static LAYOUT: [Constraint; 2] = [Constraint::Ratio(47,100), Constraint::Ratio(53,100)];
+// static LAYOUT: [Constraint; 2] = [Constraint::Ratio(47,100), Constraint::Ratio(53,100)];
 
 pub struct TerminalCleanup;
 
@@ -47,7 +48,7 @@ pub struct GlobalState<'arena> {
     // original_dir: Arc<Path>,
     pub dir_list_state: ListState,
     dir_entries: Box<[std::fs::DirEntry]>,
-
+    layout:[Constraint; 2],
     show_lines: bool,
 
     selected_asm: BTreeMap<u64, (Cow<'arena,InstructionDetail> , Rc<str>)>, //address -> (instructions,line text)
@@ -63,6 +64,8 @@ impl<'arena> GlobalState<'arena> {
     }
     pub fn start_from(path: Arc<Path>) -> Result<Self, Box<dyn std::error::Error>> {
         let dir_entries = fs::read_dir(&*path)?.filter_map(Result::ok).collect();
+        let config = WalkConfig::get_global()?;
+
         let mut state = Self {
             current_dir: path.clone(),
             // original_dir: path,
@@ -70,6 +73,7 @@ impl<'arena> GlobalState<'arena> {
             // mode: Mode::Dir,
             // file_content: Vec::new(),
             dir_entries,
+            layout:config.get_layout()?,
 
             // file_scroll: 0,
             // cursor: 0,
@@ -340,7 +344,7 @@ pub fn render_directory(
         // Layout: Split vertically for source and assembly (if selected)
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(LAYOUT.as_ref())
+            .constraints(state.layout.as_ref())
             .split(size);
 
         let list_block = Block::default().borders(Borders::ALL).title(Span::styled(
@@ -681,7 +685,7 @@ pub fn render_file_asm_viewer(
         // Layout: Split vertically for source and assembly (if selected)
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(LAYOUT.as_ref())
+            .constraints(state.global.layout.as_ref())
             .split(size);
 
         // Calculate max visible lines based on the height of the first part of the layout

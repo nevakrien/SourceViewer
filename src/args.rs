@@ -218,6 +218,26 @@ pub enum Commands {
         #[command(flatten)]
         opts: MultiBinOpts,
     },
+
+    #[command(
+        name = "config-paths",
+        about = "Prints the paths to all configuration files"
+    )]
+    ConfigPaths {
+        #[arg(
+            long,
+            value_enum,
+            num_args(0..=1),
+            default_missing_value = "always",
+            default_value_t = ColorMode::Auto,
+            global = true,
+            display_order = 999,
+            help = "Colorize output: always, auto, never (default: auto). \
+                    Using --color without a value implies 'always'."
+        )]
+        color: ColorMode,
+    },
+
 }
 
 impl Commands {
@@ -230,6 +250,7 @@ impl Commands {
             | Commands::ViewSources { opts }
             | Commands::Functions { opts }
             | Commands::DwarfDump { opts } => opts.color,
+            Commands::ConfigPaths { color } => *color,
         }
     }
 }

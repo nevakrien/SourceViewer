@@ -1,3 +1,4 @@
+use crate::config::get_walk_config_path;
 use crate::program_context::map_funcs;
 use crate::walk;
 use crate::file_parser::InstructionDetail;
@@ -471,5 +472,15 @@ pub fn functions_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>>
         }
     }
 
+    Ok(())
+}
+
+pub fn config_paths_command() -> Result<(), Box<dyn Error>> {
+    let w = get_walk_config_path();
+    let walk_path = match w {
+        Some(ref p)=>p.to_string_lossy(),
+        None=>"<does not exist>".into()
+    };
+    println!("  walk confing {}",walk_path);
     Ok(())
 }
