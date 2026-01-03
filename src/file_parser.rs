@@ -50,14 +50,14 @@ impl<'a> FileMap<'a> {
     }
 }
 
-type Endian<'a> = EndianSlice<'a, RunTimeEndian>;
+pub type EStr<'a> = EndianSlice<'a, RunTimeEndian>;
 
 // #[derive(Debug)]
 pub struct MachineFile<'a> {
     pub obj: object::File<'a>,
     pub sections: Box<[Section<'a>]>,
-    dwarf: OnceCell<Arc<Dwarf<Endian<'a>>>>,
-    addr2line: OnceCell<Arc<Context<Endian<'a>>>>,
+    dwarf: OnceCell<Arc<Dwarf<EStr<'a>>>>,
+    addr2line: OnceCell<Arc<Context<EStr<'a>>>>,
     file_lines: OnceCell<Arc<FileMap<'a>>>, //line -> instruction>
     capstone:OnceCell<Rc<Capstone>>,
 }
@@ -309,7 +309,7 @@ impl<'a> MachineFile<'a> {
             .unwrap_or(&[])
     }
 
-    pub fn load_dwarf(&self) -> Result<Arc<Dwarf<Endian<'a>>>, gimli::Error> {
+    pub fn load_dwarf(&self) -> Result<Arc<Dwarf<EStr<'a>>>, gimli::Error> {
         self.dwarf
             .get_or_try_init(|| {
                 let endian = if self.obj.is_little_endian() {
@@ -327,7 +327,7 @@ impl<'a> MachineFile<'a> {
             .cloned()
     }
 
-    pub fn get_addr2line(&self) -> Result<Arc<Context<Endian<'a>>>, Box<dyn Error>> {
+    pub fn get_addr2line(&self) -> Result<Arc<Context<EStr<'a>>>, Box<dyn Error>> {
         self.addr2line
             .get_or_try_init(|| Ok(Context::from_arc_dwarf(self.load_dwarf()?)?.into()))
             .cloned()
@@ -392,7 +392,7 @@ impl<'a> MachineFile<'a> {
 //     Ok(())
 // }
 
-// fn first_valid(ctx:&Context<Endian<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
+// fn first_valid(ctx:&Context<EStrs<'_>>,start:u64,end:u64)->Result<Option<u64>,Box<dyn Error>>{
 //     let mut iter = ctx.find_location_range(start,end-1)?;
 //     if let Some((start,_,_)) = FallibleIterator::next(&mut iter)?{
 //         Ok(Some(start))

@@ -1,3 +1,4 @@
+use crate::file_parser::EStr;
 use addr2line::FrameIter;
 use once_cell::unsync::OnceCell;
 use crate::file_parser::map_dissasm;
@@ -11,8 +12,6 @@ use crate::file_parser::InstructionDetail;
 use crate::file_parser::MachineFile;
 use addr2line::LookupContinuation;
 use addr2line::LookupResult;
-use gimli::EndianSlice;
-use gimli::RunTimeEndian;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fs;
@@ -92,10 +91,10 @@ impl<'a> FileRegistry<'a> {
 //     Ok(mapping)
 // }
 
-pub type DebugContext<'a> = addr2line::Context<EndianSlice<'a, RunTimeEndian>>;
+pub type DebugContext<'a> = addr2line::Context<EStr<'a>>;
 
 fn select_one_func<'a>(
-    mut frames: FrameIter<EndianSlice<'a, RunTimeEndian>>,
+    mut frames: FrameIter<EStr<'a>>,
 ) -> Option<String> {
     while let Ok(Some(frame)) = frames.next() {
         if let Some(raw) = frame.function {
@@ -110,7 +109,7 @@ fn select_one_func<'a>(
 }
 
 fn map_frame_func<'a,E>(
-    mut frames: FrameIter<EndianSlice<'a, RunTimeEndian>>,
+    mut frames: FrameIter<EStr<'a>>,
     mut map:impl FnMut(&str)->Result<(),E>,
 ) -> Result<(),E>{
 
@@ -137,7 +136,7 @@ fn get_func_frames<'a, 'b: 'a,'c>(
     addr2line: &'c DebugContext<'a>,
     registry: &mut FileRegistry<'b>,
     address: u64,
-) -> Option<FrameIter<'c,EndianSlice<'a, RunTimeEndian>>>{
+) -> Option<FrameIter<'c,EStr<'a>>>{
     let mut lookup_result = addr2line.find_frames(address);
 
     loop {
@@ -149,11 +148,11 @@ fn get_func_frames<'a, 'b: 'a,'c>(
                 let dwo_path = load
                     .comp_dir
                     .as_ref()
-                    .map(|comp_dir| {
+                    .map(|comp_dir : &EStr | {
                         std::path::PathBuf::from(comp_dir.to_string_lossy().to_string())
                     })
-                    .and_then(|comp_dir_path| {
-                        load.path.as_ref().map(|path| {
+                    .and_then(|comp_dir_path  | {
+                        load.path.as_ref().map(|path:&EStr| {
                             comp_dir_path
                                 .join(std::path::Path::new(&path.to_string_lossy().to_string()))
                         })
@@ -162,7 +161,7 @@ fn get_func_frames<'a, 'b: 'a,'c>(
                 // println!("load case {:?}",dwo_path);
 
                 let dwo = dwo_path.and_then(
-                    |full_path| {
+                    |full_path:std::path::PathBuf| {
                         registry
                             .get_machine(full_path.into())
                             .ok()
