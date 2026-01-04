@@ -260,7 +260,35 @@ pub struct FileState<'me, 'arena> {
     pub file_path: String,
 
     global: &'me mut GlobalState<'arena>,
+    command_input: String,
+    command_mode: bool,
     // selected_asm: BTreeMap<u64,&'arena InstructionDetail>, //address -> instructions
+}
+
+impl<'me, 'arena> FileState<'me, 'arena> {
+    #[inline]
+    fn show_command_bar(&self) -> bool {
+        self.command_mode || !self.command_input.is_empty()
+    }
+
+    #[inline]
+    fn reset_command_bar(&mut self) {
+        self.command_mode = false;
+        self.command_input.clear();
+    }
+
+    #[inline]
+    fn jump_to_line(&mut self, line: usize) {
+        if self.file_content.is_empty() {
+            return;
+        }
+
+        let max_index = self.file_content.len().saturating_sub(1);
+        let target = line.saturating_sub(1).min(max_index);
+
+        self.cursor = target;
+        self.file_scroll = target;
+    }
 }
 
 struct Line<'data> {
@@ -495,6 +523,8 @@ pub fn load_file<'b, 'arena>(
         cursor: 0,
         // asm_cursor :0,
         global,
+        command_input: String::new(),
+        command_mode: false,
         // selected_asm: BTreeMap::new(),
     })
 }
@@ -519,6 +549,33 @@ pub fn handle_file_input<'arena>(
                 return Ok(FileResult::KeepGoing);
             }
 
+            if state.command_mode {
+                match code {
+                    KeyCode::Esc => state.reset_command_bar(),
+                    KeyCode::Enter => {
+                        let command = state.command_input.trim();
+                        if let Ok(line) = command.parse::<usize>() {
+                            state.jump_to_line(line.max(1));
+                        }
+                        state.reset_command_bar();
+                    }
+                    KeyCode::Backspace => {
+                        state.command_input.pop();
+                        if state.command_input.is_empty() {
+                            state.command_mode = false;
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if !c.is_control() {
+                            state.command_input.push(c);
+                        }
+                    }
+                    _ => {}
+                }
+
+                return Ok(FileResult::KeepGoing);
+            }
+
             if state.global.help_toggle {
                 if code == KeyCode::Char('h') {
                     state.global.help_toggle = false;
@@ -529,6 +586,15 @@ pub fn handle_file_input<'arena>(
             }
 
             match code {
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    state.command_mode = true;
+                    state.command_input.clear();
+                    state.command_input.push(c);
+                }
+                KeyCode::Char(':') => {
+                    state.command_mode = true;
+                    state.command_input.clear();
+                }
                 KeyCode::Char('q') => return Ok(FileResult::Exit),
                 KeyCode::Char('h') => {
                     state.global.help_toggle = true;
@@ -683,10 +749,20 @@ pub fn render_file_asm_viewer(
         let size = f.size();
 
         // Layout: Split vertically for source and assembly (if selected)
-        let layout = Layout::default()
+        let mut layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints(state.global.layout.as_ref())
             .split(size);
+
+        let mut command_area = None;
+        if state.show_command_bar() {
+            let split = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(0), Constraint::Length(3)])
+                .split(layout[0]);
+            layout[0] = split[0];
+            command_area = Some(split[1]);
+        }
 
         // Calculate max visible lines based on the height of the first part of the layout
         let max_visible_lines = layout[0].height.saturating_sub(2) as usize;
@@ -731,6 +807,21 @@ pub fn render_file_asm_viewer(
 
         let asm_lines = layout[1].height.saturating_sub(2) as usize;
         f.render_widget(make_assembly_inner(state.global, asm_lines), layout[1]);
+
+        if let Some(command_area) = command_area {
+            let command_block = Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled(
+                    "Command",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ));
+
+            let command_text = format!("> {}", state.command_input);
+            let command = Paragraph::new(command_text).block(command_block);
+            f.render_widget(command, command_area);
+        }
 
         if state.global.help_toggle {
             render_help_popup(f);
@@ -1012,6 +1103,13 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "  s          - Scroll assembly view down",
         "  Space      - Toggle selection of the current address",
         "              and load/unload associated assembly",
+        "",
+        "Command Bar:",
+        "  0-9        - Start a command (numbers jump to a line)",
+        "  :          - Also opens the command bar",
+        "  Enter      - Run command and close",
+        "  Backspace  - Delete, closing when empty",
+        "  Esc        - Close the command bar without running",
         "",
         "Other Commands:",
         "  h          - Show this",
