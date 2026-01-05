@@ -5,7 +5,7 @@ SourceViewer lazy loads dwarf debug information to facilitate this.
 
 ![example of walk](https://github.com/nevakrien/SourceViewer/raw/v0.4.0/example_cpp.png)
 
-This tool is intended for use with C/C++/Rust and is tested on these languges.
+This tool is intended for use with C/C++/Rust and is tested on these languages.
 
 ## Installation
 
@@ -40,7 +40,7 @@ A typical workload would look something like
 ```bash
 	SourceViewer view_source sample_code/build/linux_x86_64 -w 0
 ```
-Gere we looked at the files that composed our binary and then went into the first file to view its contributions. While in the walk menu pressing h would render a popup with the controls.
+Here we looked at the files that composed our binary and then went into the first file to view its contributions. While in the walk menu pressing h would render a popup with the controls.
 
 the walk menu exposes 2 main ways to interact with assembly
 1. using Enter the selected source line is expanded/collapsed on the asm view
@@ -55,7 +55,7 @@ SourceViewer libsmall.so src/small.cpp -w 100 #using shorthand view_source is im
 then in walk click Enter and view the instructions.
 
 
-sometimes you would want to view a binary directly rather than being tighed to a specific source file. this is expecially useful for smaller programs.
+sometimes you would want to view a binary directly rather than being tied to a specific source file. this is especially useful for smaller programs.
 
 there are useful subcommands like "lines" which shows the entire assembly file,
 ```bash
@@ -78,7 +78,7 @@ it can be pumped nicely into less like so
 ```
 which is likely the main way you would want to use it.
 
-sections an alternative to lines which shows ALL sections and a littele less detail
+sections an alternative to lines which shows ALL sections and a little less detail
 ```bash
 	SourceViewer sections sample_code/build/linux_x86_64 --color | less -r
 ```
@@ -102,14 +102,14 @@ and again it can be pumped into less.
 
 # Configuration
 SourceViewer can be configured by writing to files at the system level.
-the config-paths command shows the file paths we would use on your system. if the files dont exist SourceViewer would use the default behivior.
+the config-paths command shows the file paths we would use on your system. if the files dont exist SourceViewer would use the default behavior.
 
 supported walk configs:
 
-	**asm_precent**: what precent of the screen should be the asm (must be an integer).
+	**asm_precent**: what percent of the screen should be the asm (must be an integer).
 
 # Uninstall
-just deleating the excutable should be enough. if you made config files maually you can delete them.
+just deleting the executable should be enough. if you made config files manually you can delete them.
 
 # Limitations
 1. SourceViewer is specifically designed to be very quick to open even on larger files.
@@ -125,12 +125,12 @@ However most ISAs are specifically designed with this in mind so errors should n
 
 
 # Tests
-a very good test case is runing 
+a very good test case is running 
 ```bash
 cargo run walk target/debug/SourceViewer
 ```
 
-compare_test.sh and diff_test.sh are a way to check aginst regressions.
+compare_test.sh and diff_test.sh are a way to check against regressions.
 they work by using the installed version of SourceViewer and comparing it to the build version
 
 # Platforms
