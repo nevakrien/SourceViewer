@@ -14,12 +14,12 @@ pub fn get_walk_config_path()->Option<PathBuf>{
 
 #[derive(Debug, Deserialize, Default)]
 pub struct WalkConfig {
-    pub asm_precent: Option<u32>,
+    pub asm_percent: Option<u32>,
 }
 
 impl WalkConfig {
 	pub fn get_layout(&self) -> Result<[Constraint; 2], Box<dyn Error>> {
-	    let p = self.asm_precent.unwrap_or(53);
+	    let p = self.asm_percent.unwrap_or(53);
 	    let left = 100u32
             .checked_sub(p)
             .ok_or_else(|| {

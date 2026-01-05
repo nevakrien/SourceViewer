@@ -1,7 +1,7 @@
 # SourceViewer
 Assembly viewing tool with the goal of allowing viewing disassemblies from the perspective of the source file without taking over your compilation setup, any profiling/debug build would do.
 
-SourceViewer lazy loads dwarf debug information to facilitate this.
+SourceViewer lazy loads dwarf debug information to facilitate this even for larger projects/libraries.
 
 ![example of walk](https://github.com/nevakrien/SourceViewer/raw/v0.4.0/example_cpp.png)
 
@@ -100,13 +100,21 @@ and again it can be pumped into less.
 	SourceViewer sections sample_code/build/linux_x86_64 --color | less -r
 ```
 
+most subcommands are intended for use with other tools. for example `functions` is extremely useful when combined with grep
+
+```bash
+SourceViewer functions sample_code/llvm-impl/libsmall_lang.so  | grep LLVM
+```
+
+is a quick way to find all LLVM functions in a project.
+
 # Configuration
 SourceViewer can be configured by writing to files at the system level.
-the config-paths command shows the file paths we would use on your system. if the files dont exist SourceViewer would use the default behavior.
+the config-paths command shows the file paths we would use on your system. if the files don't exist SourceViewer would use the default behavior.
 
 supported walk configs:
 
-	**asm_precent**: what percent of the screen should be the asm (must be an integer).
+	**asm_percent**: what percent of the screen should be the asm (must be an integer).
 
 # Uninstall
 just deleting the executable should be enough. if you made config files manually you can delete them.
@@ -136,4 +144,3 @@ they work by using the installed version of SourceViewer and comparing it to the
 # Platforms
 this is mostly supported for unix and specifically linux/bsd because dwarf is the main format.
 we might extend in the future.
-
