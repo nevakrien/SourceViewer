@@ -46,6 +46,12 @@ impl Drop for TerminalCleanup {
     }
 }
 
+struct SourceInfo {
+    source_text: Rc<str>,
+    file_name: Rc<str>,
+    line_num: u32,
+}
+
 pub struct GlobalState<'arena> {
     current_dir: Arc<Path>,
     // original_dir: Arc<Path>,
@@ -55,13 +61,7 @@ pub struct GlobalState<'arena> {
     show_lines: bool,
     pub config: WalkConfig,
 
-    selected_asm: BTreeMap<
-        u64,
-        (
-            Cow<'arena, InstructionDetail>,
-            Option<Rc<(Box<str>, Rc<str>, u32)>>,
-        ),
-    >, //address -> (instructions,line text, file, line)
+    selected_asm: BTreeMap<u64, (Cow<'arena, InstructionDetail>, Option<Rc<SourceInfo>>)>, //address -> (instructions,line text, file, line)
     // asm_cursor: usize,
     cur_asm: u64,
 
@@ -122,7 +122,11 @@ impl<'arena> GlobalState<'arena> {
             Some(data) => {
                 // If text is non-empty, we must provide file info
                 let file_info = if !text.is_empty() {
-                    Some(Rc::new((file_path.into(), text.clone(), line_num)))
+                    Some(Rc::new(SourceInfo {
+                        file_name: file_path.into(),
+                        source_text: text.into(),
+                        line_num,
+                    }))
                 } else {
                     None
                 };
@@ -238,15 +242,19 @@ impl<'arena> GlobalState<'arena> {
                     match text {
                         Some(t) => v.insert((
                             Cow::Owned(raw_asm),
-                            Some(Rc::new((
-                                file.into(),
-                                sanitise(t.trim_start().to_string()).into(),
-                                line,
-                            ))),
+                            Some(Rc::new(SourceInfo {
+                                file_name: file.into(),
+                                source_text: sanitise(t.trim_start().to_string()).into(),
+                                line_num: line,
+                            })),
                         )),
                         None => v.insert((
                             Cow::Owned(raw_asm),
-                            Some(Rc::new((file.into(), "<??>".into(), line))),
+                            Some(Rc::new(SourceInfo {
+                                file_name: file.into(),
+                                source_text: "??".into(),
+                                line_num: line,
+                            })),
                         )),
                     };
                 } else {
@@ -360,7 +368,7 @@ impl<'me, 'arena> FileState<'me, 'arena> {
                 let path = Path::new(file).into();
                 let code_file = code_files.get_source_file(path, false)?;
                 let text = code_file.get_line(line);
-                let text = match text {
+                let source_text = match text {
                     Some(t) => sanitise(t.trim_start().to_string()).into(),
                     None => "<??>".into(),
                 };
@@ -368,7 +376,11 @@ impl<'me, 'arena> FileState<'me, 'arena> {
                     target_addr,
                     (
                         Cow::Owned(raw_asm),
-                        Some(Rc::new((file.into(), text, line))),
+                        Some(Rc::new(SourceInfo {
+                                file_name: file.into(),
+                                source_text,
+                                line_num: line,
+                            }))
                     ),
                 );
                 self.global.cur_asm = target_addr;
@@ -391,7 +403,7 @@ impl<'me, 'arena> FileState<'me, 'arena> {
                     let path = Path::new(file).into();
                     let code_file = code_files.get_source_file(path, false)?;
                     let text = code_file.get_line(line);
-                    let text = match text {
+                    let source_text = match text {
                         Some(t) => sanitise(t.trim_start().to_string()).into(),
                         None => "<??>".into(),
                     };
@@ -399,7 +411,11 @@ impl<'me, 'arena> FileState<'me, 'arena> {
                         check_addr,
                         (
                             Cow::Owned(raw_asm),
-                            Some(Rc::new((file.into(), text, line))),
+                            Some(Rc::new(SourceInfo {
+                                file_name: file.into(),
+                                source_text,
+                                line_num: line,
+                            }))
                         ),
                     );
                     self.global.cur_asm = check_addr;
@@ -1127,12 +1143,12 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
 
         let display_text = if state.show_file_locations {
             match file_info {
-                Some(info) => format!("{}:{}", info.0, info.2),
+                Some(info) => format!("{}:{}", info.file_name, info.line_num),
                 None => "<??>".to_string(),
             }
         } else {
             match file_info {
-                Some(info) => info.1.to_string(),
+                Some(info) => info.source_text.to_string(),
                 None => "<??>".to_string(),
             }
         };
