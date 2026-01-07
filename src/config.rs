@@ -1,6 +1,6 @@
 use directories::ProjectDirs;
 use serde::Deserialize;
-use std::{error::Error, fs, path::PathBuf};
+use std::{error::Error, fs, path::PathBuf, time::Duration};
 use tui::layout::Constraint;
 
 fn get_project_dir() -> Option<ProjectDirs> {
@@ -15,6 +15,12 @@ pub fn get_walk_config_path() -> Option<PathBuf> {
 #[derive(Debug, Deserialize, Default)]
 pub struct WalkConfig {
     pub asm_percent: Option<u32>,
+
+    #[serde(alias = "fps")]
+    pub frames_per_second: Option<u64>,
+
+    #[serde(alias = "line_numbers")]
+    pub show_line_numbers: Option<bool>,
 }
 
 impl WalkConfig {
@@ -26,6 +32,20 @@ impl WalkConfig {
 
         Ok([Constraint::Ratio(left, 100), Constraint::Ratio(p, 100)])
     }
+
+    pub fn get_frames_per_second(&self) -> u64 {
+        self.frames_per_second.unwrap_or(30)
+    }
+
+    pub fn get_frame_min_time(&self) -> Duration {
+        let fps = self.get_frames_per_second();
+        Duration::from_millis(1000 / fps)
+    }
+
+    pub fn get_show_line_numbers(&self) -> bool {
+        self.show_line_numbers.unwrap_or(false)
+    }
+
     pub fn get_global() -> Result<Self, Box<dyn Error>> {
         let Some(path) = get_walk_config_path() else {
             // No home dir / config dir available → act like no config

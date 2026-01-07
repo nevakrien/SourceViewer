@@ -27,9 +27,6 @@ use tui::{
     Frame, Terminal,
 };
 
-const ACTIONS_PER_SECOND: u64 = 30; // Frames per second for terminal updates
-const FRAME_MIN_TIME: Duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AutoScrollMode {
     Off,
@@ -56,6 +53,7 @@ pub struct GlobalState<'arena> {
     dir_entries: Box<[std::fs::DirEntry]>,
     layout: [Constraint; 2],
     show_lines: bool,
+    pub config: WalkConfig,
 
     selected_asm: BTreeMap<u64, (Cow<'arena, InstructionDetail>, Rc<str>)>, //address -> (instructions,line text)
     // asm_cursor: usize,
@@ -87,7 +85,8 @@ impl<'arena> GlobalState<'arena> {
             // file_scroll: 0,
             // cursor: 0,
             // file_path: String::new(),
-            show_lines: false,
+            show_lines: config.get_show_line_numbers(),
+            config: config,
             selected_asm: BTreeMap::new(),
 
             // asm_cursor:0,
@@ -1127,14 +1126,17 @@ pub struct TerminalSession<'me, 'arena> {
     last_frame: Instant,
 }
 
-pub fn wait_frame_start(last_frame: &mut Instant) -> Result<(), Box<dyn std::error::Error>> {
+pub fn wait_frame_start(
+    last_frame: &mut Instant,
+    frame_min_time: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut now = Instant::now();
 
     // eprintln!("start waiting frame");
 
     //busy loop since asking for time causes an OS switch anyway
     //BUT we wana flush events ASAP
-    while now - *last_frame < FRAME_MIN_TIME {
+    while now - *last_frame < frame_min_time {
         //puting a proper poll breaks some functionality for stupid reason
         //this is likely a bug in the terminal libarary
         while event::poll(Duration::ZERO)? {
@@ -1170,7 +1172,8 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
         obj_file: Arc<Path>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         loop {
-            wait_frame_start(&mut self.last_frame)?;
+            let frame_min_time = self.state.config.get_frame_min_time();
+            wait_frame_start(&mut self.last_frame, frame_min_time)?;
 
             render_directory(&mut self.terminal, self.state)?;
 
@@ -1212,7 +1215,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
         obj_file: Arc<Path>,
     ) -> Result<FileResult, Box<dyn std::error::Error>> {
         loop {
-            wait_frame_start(last_frame)?;
+            wait_frame_start(last_frame, file_state.global.config.get_frame_min_time())?;
 
             render_file_asm_viewer(terminal, file_state)?;
             let res = handle_file_input(file_state, code_files, code_file, obj_file.clone())?;

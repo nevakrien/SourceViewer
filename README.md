@@ -112,9 +112,65 @@ is a quick way to find all LLVM functions in a project.
 SourceViewer can be configured by writing to files at the system level.
 the config-paths command shows the file paths we would use on your system. if the files don't exist SourceViewer would use the default behavior.
 
-supported walk configs:
+The walk configuration file should be located at `~/.config/source-viewer/walk-config.toml` and supports the following options:
 
-	**asm_percent**: what percent of the screen should be the asm (must be an integer).
+```toml
+# Layout Configuration
+asm_percent = 53  # Percentage of screen height for assembly view (0-100, default: 53)
+
+# Performance Configuration  
+frames_per_second = 30  # Frame rate for terminal updates (default: 30)
+fps = 30               # Alternative alias for frames_per_second
+
+# Display Configuration
+show_line_numbers = true  # Whether to show line numbers by default (default: true)
+line_numbers = true       # Alternative alias for show_line_numbers
+```
+
+## Available Configuration Options
+
+### `asm_percent`
+- **Type**: Integer (0-100)
+- **Default**: 53
+- **Description**: Controls the vertical split between source code and assembly view. A value of 53 means 53% of the screen height is used for the assembly view and 47% for the source code view.
+
+### `frames_per_second` (alias: `fps`)
+- **Type**: Integer (1-120)
+- **Default**: 30
+- **Description**: Controls the frame rate for terminal updates during walk mode. Higher values provide smoother scrolling but may use more CPU. Lower values reduce CPU usage but may feel less responsive.
+- **Aliases**: `fps` (shorter alternative)
+
+### `show_line_numbers` (alias: `line_numbers`)
+- **Type**: Boolean
+- **Default**: true
+- **Description**: Controls whether line numbers are displayed by default in the walk interface.
+- **Aliases**: `line_numbers` (more intuitive alternative)
+
+## Configuration Examples
+
+### High Performance Setup
+```toml
+# For smoother scrolling on powerful systems
+asm_percent = 60
+fps = 60           # Use short alias
+line_numbers = true
+```
+
+### Low Resource Setup
+```toml
+# For slower systems or remote connections
+asm_percent = 50
+frames_per_second = 15  # Use full name
+show_line_numbers = false
+```
+
+### Gaming/Optimized Setup
+```toml
+# Maximum performance for fast navigation
+asm_percent = 70
+fps = 120
+line_numbers = false
+```
 
 # Uninstall
 just deleting the executable should be enough. if you made config files manually you can delete them.
