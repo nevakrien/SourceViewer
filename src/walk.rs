@@ -30,6 +30,13 @@ use tui::{
 const ACTIONS_PER_SECOND: u64 = 30; // Frames per second for terminal updates
 const FRAME_MIN_TIME: Duration = Duration::from_millis(1000 / ACTIONS_PER_SECOND);
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AutoScrollMode {
+    Off,
+    Up,
+    Down,
+}
+
 // static LAYOUT: [Constraint; 2] = [Constraint::Ratio(47,100), Constraint::Ratio(53,100)];
 
 pub struct TerminalCleanup;
@@ -55,7 +62,7 @@ pub struct GlobalState<'arena> {
     cur_asm: u64,
 
     help_toggle: bool,
-    auto_scroll_toggle: bool,
+    auto_scroll_mode: AutoScrollMode,
     help_scroll: usize,
 }
 
@@ -87,7 +94,7 @@ impl<'arena> GlobalState<'arena> {
             cur_asm: 0,
 
             help_toggle: false,
-            auto_scroll_toggle: false,
+            auto_scroll_mode: AutoScrollMode::Off,
             help_scroll: 0,
             // asm_lines: BTreeMap::default()
         };
@@ -672,17 +679,36 @@ pub fn handle_file_input<'arena>(
                 match code {
                     KeyCode::Esc => state.reset_command_bar(),
                     KeyCode::Enter => {
-                        let command = state.command_input.trim();
-                        // Try parsing as hex address first
-                        if let Some(hex_str) = command.strip_prefix("0x") {
-                            if let Ok(addr) = u64::from_str_radix(&hex_str.to_lowercase(), 16) {
-                                if let Err(_e) = state.jump_to_address(addr, &obj_path, code_files)
-                                {
-                                    // Silently handle errors - user will see if jump worked or not
+                        let command = state.command_input.trim().to_lowercase();
+
+                        // Handle auto-scroll commands
+                        match command.as_str() {
+                            // File auto-scroll commands
+                            "file-up" | "fu" => {
+                                state.global.auto_scroll_mode = AutoScrollMode::Up;
+                            }
+                            "file-down" | "fd" => {
+                                state.global.auto_scroll_mode = AutoScrollMode::Down;
+                            }
+                            "file-stay" | "fs" => {
+                                state.global.auto_scroll_mode = AutoScrollMode::Off;
+                            }
+                            // Try parsing as hex address first
+                            _ => {
+                                if let Some(hex_str) = command.strip_prefix("0x") {
+                                    if let Ok(addr) =
+                                        u64::from_str_radix(&hex_str.to_lowercase(), 16)
+                                    {
+                                        if let Err(_e) =
+                                            state.jump_to_address(addr, &obj_path, code_files)
+                                        {
+                                            // Silently handle errors - user will see if jump worked or not
+                                        }
+                                    }
+                                } else if let Ok(line) = command.parse::<usize>() {
+                                    state.jump_to_line(line.max(1));
                                 }
                             }
-                        } else if let Ok(line) = command.parse::<usize>() {
-                            state.jump_to_line(line.max(1));
                         }
                         state.reset_command_bar();
                     }
@@ -787,26 +813,37 @@ pub fn handle_file_input<'arena>(
                             state.global.remove_asm_line(info?)
                         }
 
-                        // Auto-scroll down if toggle is enabled
-                        if state.global.auto_scroll_toggle {
-                            if state.cursor < state.file_content.len().saturating_sub(1) {
-                                state.cursor += 1;
+                        // Auto-scroll based on mode
+                        match state.global.auto_scroll_mode {
+                            AutoScrollMode::Down => {
+                                if state.cursor < state.file_content.len().saturating_sub(1) {
+                                    state.cursor += 1;
 
-                                // Scroll down if cursor goes below the visible range
-                                let max_visible_lines = state.file_content.len().saturating_sub(1);
-                                if state.cursor >= state.file_scroll + max_visible_lines {
-                                    state.file_scroll = state.cursor - max_visible_lines + 1;
+                                    // Scroll down if cursor goes below the visible range
+                                    let max_visible_lines =
+                                        state.file_content.len().saturating_sub(1);
+                                    if state.cursor >= state.file_scroll + max_visible_lines {
+                                        state.file_scroll = state.cursor - max_visible_lines + 1;
+                                    }
                                 }
                             }
+                            AutoScrollMode::Up => {
+                                if state.cursor > 0 {
+                                    state.cursor -= 1;
+
+                                    // Scroll up if cursor is above the visible range
+                                    if state.cursor < state.file_scroll {
+                                        state.file_scroll = state.cursor;
+                                    }
+                                }
+                            }
+                            AutoScrollMode::Off => {}
                         }
                     } else {
                         unreachable!();
                     }
                 }
                 KeyCode::Char('l') => state.global.show_lines = !state.global.show_lines,
-                KeyCode::Char('a') => {
-                    state.global.auto_scroll_toggle = !state.global.auto_scroll_toggle
-                }
                 KeyCode::Esc => {
                     return Ok(FileResult::Dir);
                 }
@@ -1309,11 +1346,18 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>, help_s
         "  Esc        - Close the command bar without running",
         "",
         "Other Commands:",
-        "  h          - Show this help",
+        "  h          - Show this",
         "  q          - Quit file viewer",
         "  l          - Toggle line numbers",
-        "  a          - Toggle auto-scroll on Enter",
         "  Esc        - Return to directory view",
+        "",
+        "File Auto-Scroll Commands:",
+        "  :file-up   - Auto-scroll Up on Enter",
+        "  :fu        - Short for file-up",
+        "  :file-down - Auto-scroll Down on Enter",
+        "  :fd        - Short for file-down",
+        "  :file-stay - Disable auto-scroll (default)",
+        "  :fs        - Short for file-stay",
         "",
         "Help Navigation:",
         "  w/s or Up/Down - Scroll help content",
