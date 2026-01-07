@@ -131,18 +131,17 @@ line_numbers = true       # Alternative alias for show_line_numbers
 
 ### `asm_percent`
 - **Type**: Integer (0-100)
-- **Default**: 53
 - **Description**: Controls the vertical split between source code and assembly view. A value of 53 means 53% of the screen height is used for the assembly view and 47% for the source code view.
 
 ### `frames_per_second` (alias: `fps`)
 - **Type**: Integer (1-120)
-- **Default**: 30
-- **Description**: Controls the frame rate for terminal updates during walk mode. Higher values provide smoother scrolling but may use more CPU. Lower values reduce CPU usage but may feel less responsive.
+- **Default**: 30 
+- **Description**: Controls the frame rate for terminal updates during walk mode. Higher values mean faster scrolling which isnt that usefull. if the effective fps goes above say 100 the app is barely usable. this value exists mostly for platform stability for system that need it.
 - **Aliases**: `fps` (shorter alternative)
 
 ### `show_line_numbers` (alias: `line_numbers`)
 - **Type**: Boolean
-- **Default**: true
+- **Default**: false
 - **Description**: Controls whether line numbers are displayed by default in the walk interface.
 - **Aliases**: `line_numbers` (more intuitive alternative)
 
@@ -152,24 +151,8 @@ line_numbers = true       # Alternative alias for show_line_numbers
 ```toml
 # For smoother scrolling on powerful systems
 asm_percent = 60
-fps = 60           # Use short alias
+fps = 60
 line_numbers = true
-```
-
-### Low Resource Setup
-```toml
-# For slower systems or remote connections
-asm_percent = 50
-frames_per_second = 15  # Use full name
-show_line_numbers = false
-```
-
-### Gaming/Optimized Setup
-```toml
-# Maximum performance for fast navigation
-asm_percent = 70
-fps = 120
-line_numbers = false
 ```
 
 # Uninstall
@@ -179,7 +162,7 @@ just deleting the executable should be enough. if you made config files manually
 1. SourceViewer is specifically designed to be very quick to open even on larger files.
 as such sometimes errors are discovered late.
 
-2. also note that on assembly that is not mapped to source is not guaranteed to be correct.
+2. also note that on assembly that is not mapped to source is not guaranteed to be correct in all cases.
 this is because sometimes compilers would leave data directly in a code section. and there is absolutely no way to detect that.
 
 However most ISAs are specifically designed with this in mind so errors should not go out of control.

@@ -21,6 +21,9 @@ pub struct WalkConfig {
 
     #[serde(alias = "line_numbers")]
     pub show_line_numbers: Option<bool>,
+
+    #[serde(alias = "file_locations")]
+    pub show_file_locations: Option<bool>,
 }
 
 impl WalkConfig {
@@ -44,6 +47,10 @@ impl WalkConfig {
 
     pub fn get_show_line_numbers(&self) -> bool {
         self.show_line_numbers.unwrap_or(false)
+    }
+
+    pub fn get_show_file_locations(&self) -> bool {
+        self.show_file_locations.unwrap_or(false)
     }
 
     pub fn get_global() -> Result<Self, Box<dyn Error>> {

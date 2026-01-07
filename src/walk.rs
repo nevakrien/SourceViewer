@@ -55,13 +55,20 @@ pub struct GlobalState<'arena> {
     show_lines: bool,
     pub config: WalkConfig,
 
-    selected_asm: BTreeMap<u64, (Cow<'arena, InstructionDetail>, Rc<str>)>, //address -> (instructions,line text)
+    selected_asm: BTreeMap<
+        u64,
+        (
+            Cow<'arena, InstructionDetail>,
+            Option<Rc<(Box<str>, Rc<str>, u32)>>,
+        ),
+    >, //address -> (instructions,line text, file, line)
     // asm_cursor: usize,
     cur_asm: u64,
 
     help_toggle: bool,
     auto_scroll_mode: AutoScrollMode,
     help_scroll: usize,
+    show_file_locations: bool,
 }
 
 impl<'arena> GlobalState<'arena> {
@@ -86,7 +93,6 @@ impl<'arena> GlobalState<'arena> {
             // cursor: 0,
             // file_path: String::new(),
             show_lines: config.get_show_line_numbers(),
-            config: config,
             selected_asm: BTreeMap::new(),
 
             // asm_cursor:0,
@@ -95,6 +101,8 @@ impl<'arena> GlobalState<'arena> {
             help_toggle: false,
             auto_scroll_mode: AutoScrollMode::Off,
             help_scroll: 0,
+            show_file_locations: config.get_show_file_locations(),
+            config: config,
             // asm_lines: BTreeMap::default()
         };
 
@@ -102,14 +110,26 @@ impl<'arena> GlobalState<'arena> {
         Ok(state)
     }
 
-    fn add_asm_line(&mut self, debug: Option<&'arena [InstructionDetail]>, text: Rc<str>) {
+    fn add_asm_line(
+        &mut self,
+        debug: Option<&'arena [InstructionDetail]>,
+        text: Rc<str>,
+        file_path: &str,
+        line_num: u32,
+    ) {
         match debug {
             None => {}
             Some(data) => {
-                // let current_addres = self
+                // If text is non-empty, we must provide file info
+                let file_info = if !text.is_empty() {
+                    Some(Rc::new((file_path.into(), text.clone(), line_num)))
+                } else {
+                    None
+                };
+
                 self.selected_asm.extend(
                     data.iter()
-                        .map(|x| (x.address, (Cow::Borrowed(x), text.clone()))),
+                        .map(|x| (x.address, (Cow::Borrowed(x), file_info.clone()))),
                 );
             }
         }
@@ -218,12 +238,19 @@ impl<'arena> GlobalState<'arena> {
                     match text {
                         Some(t) => v.insert((
                             Cow::Owned(raw_asm),
-                            sanitise(t.trim_start().to_string()).into(),
+                            Some(Rc::new((
+                                file.into(),
+                                sanitise(t.trim_start().to_string()).into(),
+                                line,
+                            ))),
                         )),
-                        None => v.insert((Cow::Owned(raw_asm), "<?>".into())),
+                        None => v.insert((
+                            Cow::Owned(raw_asm),
+                            Some(Rc::new((file.into(), "<??>".into(), line))),
+                        )),
                     };
                 } else {
-                    v.insert((Cow::Owned(raw_asm), "<?>".into()));
+                    v.insert((Cow::Owned(raw_asm), None));
                 }
 
                 // Line::new(sanitise())
@@ -337,9 +364,13 @@ impl<'me, 'arena> FileState<'me, 'arena> {
                     Some(t) => sanitise(t.trim_start().to_string()).into(),
                     None => "<??>".into(),
                 };
-                self.global
-                    .selected_asm
-                    .insert(target_addr, (Cow::Owned(raw_asm), text));
+                self.global.selected_asm.insert(
+                    target_addr,
+                    (
+                        Cow::Owned(raw_asm),
+                        Some(Rc::new((file.into(), text, line))),
+                    ),
+                );
                 self.global.cur_asm = target_addr;
                 return Ok(());
             }
@@ -364,9 +395,13 @@ impl<'me, 'arena> FileState<'me, 'arena> {
                         Some(t) => sanitise(t.trim_start().to_string()).into(),
                         None => "<??>".into(),
                     };
-                    self.global
-                        .selected_asm
-                        .insert(check_addr, (Cow::Owned(raw_asm), text));
+                    self.global.selected_asm.insert(
+                        check_addr,
+                        (
+                            Cow::Owned(raw_asm),
+                            Some(Rc::new((file.into(), text, line))),
+                        ),
+                    );
                     self.global.cur_asm = check_addr;
                     return Ok(());
                 }
@@ -575,6 +610,7 @@ pub fn handle_directory_input<'me, 'arena>(
 
                 KeyCode::Char('s') => state.asm_down(),
                 KeyCode::Char(' ') => state.asm_toggle(&obj_path, code_files)?,
+                KeyCode::Char('f') => state.show_file_locations = !state.show_file_locations,
 
                 KeyCode::Enter => {
                     if let Some(i) = state.dir_list_state.selected() {
@@ -807,7 +843,12 @@ pub fn handle_file_input<'arena>(
                         let info = line.load_debug(code_file, obj_path);
 
                         if line.is_selected {
-                            state.global.add_asm_line(info?, line.content.clone())
+                            state.global.add_asm_line(
+                                info?,
+                                line.content.clone(),
+                                state.file_path.as_str(),
+                                line.line_number as u32,
+                            )
                         } else {
                             state.global.remove_asm_line(info?)
                         }
@@ -843,6 +884,9 @@ pub fn handle_file_input<'arena>(
                     }
                 }
                 KeyCode::Char('l') => state.global.show_lines = !state.global.show_lines,
+                KeyCode::Char('f') => {
+                    state.global.show_file_locations = !state.global.show_file_locations
+                }
                 KeyCode::Esc => {
                     return Ok(FileResult::Dir);
                 }
@@ -1076,17 +1120,26 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
         }
     }
 
-    while let Some((_, (ins, text))) = iter.next() {
+    while let Some((_, (ins, file_info))) = iter.next() {
         if asm_items.len() >= max_visible_lines {
             break;
         }
 
+        let display_text = if state.show_file_locations {
+            match file_info {
+                Some(info) => format!("{}:{}", info.0, info.2),
+                None => "<??>".to_string(),
+            }
+        } else {
+            match file_info {
+                Some(info) => info.1.to_string(),
+                None => "<??>".to_string(),
+            }
+        };
+
         let formatted_instruction = format!(
             "{:#010x}: {:<6} {:<30} {:<30}",
-            ins.address,
-            ins.mnemonic,
-            ins.op_str,
-            text.trim_start(),
+            ins.address, ins.mnemonic, ins.op_str, display_text,
         );
 
         asm_items.push(
@@ -1241,16 +1294,26 @@ pub fn render_scrollable_popup(
     height_percent: u16,
     scroll_offset: usize,
 ) {
-    // Calculate centered area
+    // Calculate centered area - make height auto-adjust to content
     let terminal_size = frame.size();
     let popup_width = terminal_size.width * width_percent / 100;
-    let popup_height = terminal_size.height * height_percent / 100;
+
+    // Calculate needed height: content lines + title + borders
+    let needed_height = content.len() + 2; // +2 for top/bottom borders
+    let max_height = terminal_size.height * height_percent / 100;
+    let popup_height = needed_height
+        .min(max_height as usize)
+        .min(terminal_size.height as usize - 4) as u16;
+
     let popup_x = terminal_size.x + (terminal_size.width - popup_width) / 2;
     let popup_y = terminal_size.y + (terminal_size.height - popup_height) / 2;
     let area = Rect::new(popup_x, popup_y, popup_width, popup_height);
 
     // Clear the popup area
     frame.render_widget(Clear, area);
+
+    // Convert content to spans
+    let content_spans: Vec<Spans> = content.iter().map(|line| Spans::from(*line)).collect();
 
     // Create the popup block
     let block = Block::default()
@@ -1263,49 +1326,10 @@ pub fn render_scrollable_popup(
         .borders(Borders::ALL)
         .style(Style::default().bg(Color::Black).fg(Color::White));
 
-    // Calculate visible area (subtract borders)
-    let inner_area = block.inner(area);
-    let available_height = inner_area.height as usize;
-
-    // Calculate scroll indicators and visible content
-    let total_lines = content.len();
-    let max_scroll = total_lines.saturating_sub(available_height);
-    let adjusted_scroll = scroll_offset.min(max_scroll);
-
-    // Get visible content
-    let visible_content: Vec<Spans> = content
-        .iter()
-        .skip(adjusted_scroll)
-        .take(available_height)
-        .map(|line| Spans::from(*line))
-        .collect();
-
-    // Add scroll indicators if needed
-    let mut final_content = visible_content;
-    if total_lines > available_height {
-        let scroll_indicator = if adjusted_scroll == 0 {
-            "▼ (more below)"
-        } else if adjusted_scroll >= max_scroll {
-            "▲ (more above)"
-        } else {
-            "▲ (more above) ▼ (more below)"
-        };
-
-        // Add indicator to the last line if there's space
-        if final_content.len() < available_height {
-            final_content.push(Spans::from(Span::styled(
-                scroll_indicator,
-                Style::default()
-                    .fg(Color::Gray)
-                    .add_modifier(Modifier::ITALIC),
-            )));
-        }
-    }
-
-    let paragraph = Paragraph::new(final_content)
+    let paragraph = Paragraph::new(content_spans)
         .block(block)
         .alignment(Alignment::Left)
-        .scroll((adjusted_scroll as u16, 0));
+        .scroll((scroll_offset as u16, 0));
 
     // Render the popup
     frame.render_widget(paragraph, area);
@@ -1352,6 +1376,7 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>, help_s
         "  h          - Show this",
         "  q          - Quit file viewer",
         "  l          - Toggle line numbers",
+        "  f          - Toggle file location vs source text in assembly view",
         "  Esc        - Return to directory view",
         "",
         "File Auto-Scroll Commands:",
@@ -1366,7 +1391,7 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>, help_s
         "  w/s or Up/Down - Scroll help content",
         "  Page Up/Down - Scroll faster (10 lines)",
         "  Home/End    - Jump to top/bottom",
-        "  h/q/Esc     - Close help",
+        "  h/Esc     - Close help",
     ];
 
     render_scrollable_popup(frame, "Help", &help_content, 85, 85, help_scroll); // 85% width, 85% height
@@ -1393,12 +1418,13 @@ pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>, he
         "Other Commands:",
         "  h          - Show this help",
         "  q          - Quit the application",
+        "  f          - Toggle file location vs source text in assembly view",
         "",
         "Help Navigation:",
         "  w/s or Up/Down - Scroll help content",
         "  Page Up/Down - Scroll faster (10 lines)",
         "  Home/End    - Jump to top/bottom",
-        "  h/q/Esc     - Close help",
+        "  h/Esc     - Close help",
     ];
 
     render_scrollable_popup(frame, "Help", &help_content, 85, 85, help_scroll); // 85% width, 85% height
