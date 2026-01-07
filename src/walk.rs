@@ -55,6 +55,8 @@ pub struct GlobalState<'arena> {
     cur_asm: u64,
 
     help_toggle: bool,
+    auto_scroll_toggle: bool,
+    help_scroll: usize,
 }
 
 impl<'arena> GlobalState<'arena> {
@@ -85,6 +87,8 @@ impl<'arena> GlobalState<'arena> {
             cur_asm: 0,
 
             help_toggle: false,
+            auto_scroll_toggle: false,
+            help_scroll: 0,
             // asm_lines: BTreeMap::default()
         };
 
@@ -478,7 +482,7 @@ pub fn render_directory(
         f.render_widget(make_assembly_inner(state, asm_lines), layout[1]);
 
         if state.help_toggle {
-            render_dir_help_popup(f)
+            render_dir_help_popup(f, state.help_scroll)
         }
     })?;
     Ok(())
@@ -501,6 +505,37 @@ pub fn handle_directory_input<'me, 'arena>(
                 // Ignore key releases (We hate Windows!)
                 return Ok(DirResult::KeepGoing);
             }
+
+            if state.help_toggle {
+                match code {
+                    KeyCode::Up | KeyCode::Char('w') => {
+                        state.help_scroll = state.help_scroll.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('s') => {
+                        state.help_scroll = state.help_scroll.saturating_add(1);
+                    }
+                    KeyCode::PageUp => {
+                        state.help_scroll = state.help_scroll.saturating_sub(10);
+                    }
+                    KeyCode::PageDown => {
+                        state.help_scroll = state.help_scroll.saturating_add(10);
+                    }
+                    KeyCode::Home => {
+                        state.help_scroll = 0;
+                    }
+                    KeyCode::End => {
+                        // Set to a large number, will be clamped in rendering
+                        state.help_scroll = usize::MAX;
+                    }
+                    KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => {
+                        state.help_toggle = false;
+                        state.help_scroll = 0;
+                    }
+                    _ => {}
+                }
+                return Ok(DirResult::KeepGoing);
+            }
+
             match code {
                 KeyCode::Char('q') => {
                     // return Err("exiting normally".into());
@@ -669,10 +704,34 @@ pub fn handle_file_input<'arena>(
             }
 
             if state.global.help_toggle {
-                if code == KeyCode::Char('h') {
-                    state.global.help_toggle = false;
-                } else if code == KeyCode::Char('q') {
-                    return Ok(FileResult::Exit);
+                match code {
+                    KeyCode::Up | KeyCode::Char('w') => {
+                        state.global.help_scroll = state.global.help_scroll.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('s') => {
+                        state.global.help_scroll = state.global.help_scroll.saturating_add(1);
+                    }
+                    KeyCode::PageUp => {
+                        state.global.help_scroll = state.global.help_scroll.saturating_sub(10);
+                    }
+                    KeyCode::PageDown => {
+                        state.global.help_scroll = state.global.help_scroll.saturating_add(10);
+                    }
+                    KeyCode::Home => {
+                        state.global.help_scroll = 0;
+                    }
+                    KeyCode::End => {
+                        // Set to a large number, will be clamped in rendering
+                        state.global.help_scroll = usize::MAX;
+                    }
+                    KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => {
+                        state.global.help_toggle = false;
+                        state.global.help_scroll = 0;
+                        if code == KeyCode::Char('q') {
+                            return Ok(FileResult::Exit);
+                        }
+                    }
+                    _ => {}
                 }
                 return Ok(FileResult::KeepGoing);
             }
@@ -727,11 +786,27 @@ pub fn handle_file_input<'arena>(
                         } else {
                             state.global.remove_asm_line(info?)
                         }
+
+                        // Auto-scroll down if toggle is enabled
+                        if state.global.auto_scroll_toggle {
+                            if state.cursor < state.file_content.len().saturating_sub(1) {
+                                state.cursor += 1;
+
+                                // Scroll down if cursor goes below the visible range
+                                let max_visible_lines = state.file_content.len().saturating_sub(1);
+                                if state.cursor >= state.file_scroll + max_visible_lines {
+                                    state.file_scroll = state.cursor - max_visible_lines + 1;
+                                }
+                            }
+                        }
                     } else {
                         unreachable!();
                     }
                 }
                 KeyCode::Char('l') => state.global.show_lines = !state.global.show_lines,
+                KeyCode::Char('a') => {
+                    state.global.auto_scroll_toggle = !state.global.auto_scroll_toggle
+                }
                 KeyCode::Esc => {
                     return Ok(FileResult::Dir);
                 }
@@ -913,7 +988,7 @@ pub fn render_file_asm_viewer(
         }
 
         if state.global.help_toggle {
-            render_help_popup(f);
+            render_help_popup(f, state.global.help_scroll);
         }
     })?;
 
@@ -1118,12 +1193,13 @@ pub fn clear_entire_screen<B: tui::backend::Backend>(frame: &mut tui::Frame<B>) 
     frame.render_widget(Clear, entire_area);
 }
 
-pub fn render_popup(
+pub fn render_scrollable_popup(
     frame: &mut Frame<CrosstermBackend<io::Stdout>>,
     title: &str,
     content: &[&str],
     width_percent: u16,
     height_percent: u16,
+    scroll_offset: usize,
 ) {
     // Calculate centered area
     let terminal_size = frame.size();
@@ -1147,20 +1223,65 @@ pub fn render_popup(
         .borders(Borders::ALL)
         .style(Style::default().bg(Color::Black).fg(Color::White));
 
-    let paragraph = Paragraph::new(
-        content
-            .iter()
-            .map(|line| Spans::from(*line))
-            .collect::<Vec<_>>(),
-    )
-    .block(block)
-    .alignment(Alignment::Left); // Use left alignment for help content
+    // Calculate visible area (subtract borders)
+    let inner_area = block.inner(area);
+    let available_height = inner_area.height as usize;
+
+    // Calculate scroll indicators and visible content
+    let total_lines = content.len();
+    let max_scroll = total_lines.saturating_sub(available_height);
+    let adjusted_scroll = scroll_offset.min(max_scroll);
+
+    // Get visible content
+    let visible_content: Vec<Spans> = content
+        .iter()
+        .skip(adjusted_scroll)
+        .take(available_height)
+        .map(|line| Spans::from(*line))
+        .collect();
+
+    // Add scroll indicators if needed
+    let mut final_content = visible_content;
+    if total_lines > available_height {
+        let scroll_indicator = if adjusted_scroll == 0 {
+            "▼ (more below)"
+        } else if adjusted_scroll >= max_scroll {
+            "▲ (more above)"
+        } else {
+            "▲ (more above) ▼ (more below)"
+        };
+
+        // Add indicator to the last line if there's space
+        if final_content.len() < available_height {
+            final_content.push(Spans::from(Span::styled(
+                scroll_indicator,
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            )));
+        }
+    }
+
+    let paragraph = Paragraph::new(final_content)
+        .block(block)
+        .alignment(Alignment::Left)
+        .scroll((adjusted_scroll as u16, 0));
 
     // Render the popup
     frame.render_widget(paragraph, area);
 }
 
-pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
+pub fn render_popup(
+    frame: &mut Frame<CrosstermBackend<io::Stdout>>,
+    title: &str,
+    content: &[&str],
+    width_percent: u16,
+    height_percent: u16,
+) {
+    render_scrollable_popup(frame, title, content, width_percent, height_percent, 0);
+}
+
+pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>, help_scroll: usize) {
     let help_content = [
         "Help - File Input Behavior",
         "",
@@ -1171,6 +1292,7 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "Selection:",
         "  Enter      - Toggle selection of the current line",
         "              and load/unload associated assembly",
+        "              (auto-scrolls when enabled)",
         "",
         "Assembly View:",
         "  w          - Scroll assembly view up",
@@ -1181,21 +1303,29 @@ pub fn render_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "Command Bar:",
         "  0-9        - Start a command (numbers jump to a line)",
         "  :          - Also opens the command bar",
+        "  0xADDR     - Jump to hexadecimal address (e.g., 0x401000)",
         "  Enter      - Run command and close",
         "  Backspace  - Delete, closing when empty",
         "  Esc        - Close the command bar without running",
         "",
         "Other Commands:",
-        "  h          - Show this",
+        "  h          - Show this help",
         "  q          - Quit file viewer",
         "  l          - Toggle line numbers",
+        "  a          - Toggle auto-scroll on Enter",
         "  Esc        - Return to directory view",
+        "",
+        "Help Navigation:",
+        "  w/s or Up/Down - Scroll help content",
+        "  Page Up/Down - Scroll faster (10 lines)",
+        "  Home/End    - Jump to top/bottom",
+        "  h/q/Esc     - Close help",
     ];
 
-    render_popup(frame, "Help", &help_content, 80, 80); // 80% width, 80% height
+    render_scrollable_popup(frame, "Help", &help_content, 85, 85, help_scroll); // 85% width, 85% height
 }
 
-pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
+pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>, help_scroll: usize) {
     let help_content = [
         "Help - Directory Navigation",
         "",
@@ -1216,7 +1346,13 @@ pub fn render_dir_help_popup(frame: &mut Frame<CrosstermBackend<io::Stdout>>) {
         "Other Commands:",
         "  h          - Show this help",
         "  q          - Quit the application",
+        "",
+        "Help Navigation:",
+        "  w/s or Up/Down - Scroll help content",
+        "  Page Up/Down - Scroll faster (10 lines)",
+        "  Home/End    - Jump to top/bottom",
+        "  h/q/Esc     - Close help",
     ];
 
-    render_popup(frame, "Help", &help_content, 80, 80); // 80% width, 80% height
+    render_scrollable_popup(frame, "Help", &help_content, 85, 85, help_scroll); // 85% width, 85% height
 }
