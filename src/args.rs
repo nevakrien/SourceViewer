@@ -120,7 +120,6 @@ pub struct ViewSource {
     pub selections: Vec<FileSelection>,
 }
 
-
 /// Top-level CLI
 #[derive(Parser, Debug)]
 #[command(
@@ -159,11 +158,11 @@ pub enum Commands {
         #[command(flatten)]
         opts: SingleBinOpts,
 
-        #[arg(help="file path to start from")]
-        file:Option<PathBuf>,
+        #[arg(help = "file path to start from")]
+        file: Option<PathBuf>,
 
-        #[arg(help="line numer to start from")]
-        line:Option<usize>,
+        #[arg(help = "line numer to start from")]
+        line: Option<usize>,
     },
 
     #[command(about = "Dumps sections information for each file")]
@@ -237,14 +236,14 @@ pub enum Commands {
         )]
         color: ColorMode,
     },
-
 }
 
 impl Commands {
     pub fn get_color(&self) -> ColorMode {
         match self {
-            Commands::Walk{opts,..}|
-            Commands::ViewSource(ViewSource { opts, .. }) => opts.color,
+            Commands::Walk { opts, .. } | Commands::ViewSource(ViewSource { opts, .. }) => {
+                opts.color
+            }
             Commands::Sections { opts }
             | Commands::Lines { opts, .. }
             | Commands::ViewSources { opts }

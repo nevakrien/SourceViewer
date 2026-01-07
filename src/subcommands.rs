@@ -1,14 +1,14 @@
-use crate::config::get_walk_config_path;
-use crate::program_context::map_funcs;
-use crate::walk;
-use crate::file_parser::InstructionDetail;
-use fallible_iterator::FallibleIterator;
 use crate::args::FileSelection;
+use crate::config::get_walk_config_path;
+use crate::file_parser::InstructionDetail;
 use crate::program_context::find_func_name;
+use crate::program_context::map_funcs;
 use crate::program_context::CodeRegistry;
+use crate::walk;
 use crate::walk::FileResult;
 use crate::walk::GlobalState;
 use crate::walk::TerminalSession;
+use fallible_iterator::FallibleIterator;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -30,7 +30,11 @@ use crate::println;
 
 // use crate::program_context::AddressFileMapping;
 
-pub fn walk_command(obj_file: Arc<Path>,file:Option<PathBuf>,line:Option<usize>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn walk_command(
+    obj_file: Arc<Path>,
+    file: Option<PathBuf>,
+    line: Option<usize>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let asm_arena = Arena::new();
     let code_arena = Arena::new();
     let mut registry = FileRegistry::new(&asm_arena);
@@ -47,7 +51,7 @@ pub fn walk_command(obj_file: Arc<Path>,file:Option<PathBuf>,line:Option<usize>)
     let mut session = TerminalSession::new(&mut state)?;
 
     if let Some(path) = file {
-        let path:Arc<Path> = fs::canonicalize(path)?.into();
+        let path: Arc<Path> = fs::canonicalize(path)?.into();
         let code_file = code_files
             .get_source_file(path.clone(), true)
             .map_err(|e| format!("Failed to load source {:?}: {}", path, e))?;
@@ -90,19 +94,22 @@ pub fn lines_command(file_paths: Vec<PathBuf>, ignore_unknown: bool) -> Result<(
             if let Section::Code(code_section) = section {
                 println!("{}", section.name());
 
-                code_section.map_asm(&cs,&mut |ins| {
+                code_section.map_asm(&cs, &mut |ins| {
                     let (file, line) = match ctx.find_location(ins.address)? {
                         Some(loc) => {
-                            if ignore_unknown && (loc.file.is_none()||loc.line.is_none()){
-                                return Ok(());//closure
+                            if ignore_unknown && (loc.file.is_none() || loc.line.is_none()) {
+                                return Ok(()); //closure
                             }
                             let file = loc.file.unwrap_or("<unknown>").to_string();
-                            let line = loc.line.map(|i| {i.to_string()}).unwrap_or("<unknown>".to_string());
+                            let line = loc
+                                .line
+                                .map(|i| i.to_string())
+                                .unwrap_or("<unknown>".to_string());
                             (file, line)
-                        },
+                        }
                         None => {
                             if ignore_unknown {
-                                return Ok(());//closure
+                                return Ok(()); //closure
                             }
                             ("<unknown>".to_string(), "<unknown>".to_string())
                         }
@@ -202,7 +209,7 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
                         code_section.data.len()
                     );
 
-                    code_section.map_asm(&cs,&mut |instruction:&InstructionDetail|{
+                    code_section.map_asm(&cs, &mut |instruction: &InstructionDetail| {
                         let func_name = match &debug {
                             None => None,
                             Some(ctx) => resolve_func_name(ctx, instruction.address),
@@ -235,7 +242,6 @@ pub fn sections_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> 
     Ok(())
 }
 
-
 pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>> {
     let mut source_files: HashSet<Box<str>> = HashSet::new();
     for file_path in file_paths {
@@ -243,21 +249,19 @@ pub fn view_sources_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Erro
         let buffer = fs::read(file_path)?;
         let machine_file = MachineFile::parse(&buffer)?;
         let ctx = machine_file.get_addr2line()?;
-        for section in machine_file.sections.iter(){
-            let Section::Code(code) = section else{
+        for section in machine_file.sections.iter() {
+            let Section::Code(code) = section else {
                 continue;
             };
 
-            let mut locs = ctx.find_location_range(code.address,code.get_high())?;
-            while let Some((_,_,loc)) =FallibleIterator::next(&mut locs)?{
-                if let Some(file) = loc.file{
+            let mut locs = ctx.find_location_range(code.address, code.get_high())?;
+            while let Some((_, _, loc)) = FallibleIterator::next(&mut locs)? {
+                if let Some(file) = loc.file {
                     source_files.insert(file.into());
                 }
             }
-
         }
     }
-
 
     let mut source_files: Vec<_> = source_files.into_iter().collect();
     source_files.sort();
@@ -297,18 +301,17 @@ pub fn view_source_command(
 
     // Populate a unique list of source files in the order they appear
     let mut source_files_set: HashSet<PathBuf> = HashSet::new();
-    for section in machine_file.sections.iter(){
-        let Section::Code(code) = section else{
+    for section in machine_file.sections.iter() {
+        let Section::Code(code) = section else {
             continue;
         };
 
-        let mut locs = ctx.find_location_range(code.address,code.get_high())?;
-        while let Some((_,_,loc)) =FallibleIterator::next(&mut locs)?{
-            if let Some(file) = loc.file{
+        let mut locs = ctx.find_location_range(code.address, code.get_high())?;
+        while let Some((_, _, loc)) = FallibleIterator::next(&mut locs)? {
+            if let Some(file) = loc.file {
                 source_files_set.insert(file.into());
             }
         }
-
     }
 
     let mut source_files: Vec<&Path> = source_files_set.iter().map(|p| p.as_path()).collect();
@@ -348,11 +351,11 @@ pub fn view_source_command(
         let mut state = GlobalState::start_from(parent.into())?;
         let mut session = TerminalSession::new(&mut state)?;
 
-        let code_file = code_files.get_source_file(file_path.into(),true)?;
+        let code_file = code_files.get_source_file(file_path.into(), true)?;
 
         //file
         {
-            let mut file_state = crate::walk::load_file(session.state, file_path,code_file)?;
+            let mut file_state = crate::walk::load_file(session.state, file_path, code_file)?;
             if let Some(FileSelection::Index(i)) = selections.get(1) {
                 file_state.file_scroll = i.saturating_sub(1);
                 file_state.cursor = i.saturating_sub(1);
@@ -458,14 +461,12 @@ pub fn functions_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>>
 
         for section in &machine_file.sections.clone() {
             if let Section::Code(code_section) = section {
-
-                code_section.map_asm(&cs,&mut |ins| {
-                    map_funcs(&ctx, &mut registry, ins.address,|func|{
-                        if seen.insert(func.to_string()){
-                            println!("{} {}",seen.len().to_string().blue(),func);
+                code_section.map_asm(&cs, &mut |ins| {
+                    map_funcs(&ctx, &mut registry, ins.address, |func| {
+                        if seen.insert(func.to_string()) {
+                            println!("{} {}", seen.len().to_string().blue(), func);
                         }
                         Ok(())
-
                     })
                 })?;
             }
@@ -478,9 +479,9 @@ pub fn functions_command(file_paths: Vec<PathBuf>) -> Result<(), Box<dyn Error>>
 pub fn config_paths_command() -> Result<(), Box<dyn Error>> {
     let w = get_walk_config_path();
     let walk_path = match w {
-        Some(ref p)=>p.to_string_lossy(),
-        None=>"<does not exist>".into()
+        Some(ref p) => p.to_string_lossy(),
+        None => "<does not exist>".into(),
     };
-    println!("  walk confing {}",walk_path);
+    println!("  walk confing {}", walk_path);
     Ok(())
 }

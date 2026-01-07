@@ -24,7 +24,7 @@ fn main() -> ExitCode {
     apply_color_mode(cli.get_color());
 
     let res = match cli.command {
-        Commands::Walk { opts,file,line } => walk_command(opts.bin.into(),file,line),
+        Commands::Walk { opts, file, line } => walk_command(opts.bin.into(), file, line),
         Commands::Sections { opts } => sections_command(opts.bins),
         Commands::Lines {
             opts,
@@ -42,7 +42,6 @@ fn main() -> ExitCode {
         Commands::ViewSources { opts } => view_sources_command(opts.bins),
         Commands::DwarfDump { opts } => dwarf_dump_command(opts.bins),
         Commands::ConfigPaths { .. } => config_paths_command(),
-
     };
 
     ExitCode::from(match res {

@@ -1,4 +1,3 @@
-use std::rc::Rc;
 use object::pe::IMAGE_SCN_MEM_EXECUTE;
 use object::{Object, ObjectSection, SectionFlags};
 use once_cell::unsync::OnceCell;
@@ -6,22 +5,23 @@ use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use addr2line::Context;
 use capstone::arch::{arm, arm64, x86};
 use capstone::prelude::*;
+use fallible_iterator::FallibleIterator;
 use gimli::RunTimeEndian;
 use gimli::{read::Dwarf, EndianSlice, SectionId};
 use std::error::Error;
-use fallible_iterator::FallibleIterator;
 // pub type LineMap = BTreeMap<u32,Vec<InstructionDetail>>;
 // pub type FileMap = HashMap<Arc<Path>,LineMap>;
 
-#[derive(Debug, Clone,Copy)]
-pub struct CodeRange<'a>{
-    pub address:u64,
-    pub data:&'a[u8]
+#[derive(Debug, Clone, Copy)]
+pub struct CodeRange<'a> {
+    pub address: u64,
+    pub data: &'a [u8],
 }
 
 #[derive(Debug, Default)]
@@ -59,7 +59,7 @@ pub struct MachineFile<'a> {
     dwarf: OnceCell<Arc<Dwarf<EStr<'a>>>>,
     addr2line: OnceCell<Arc<Context<EStr<'a>>>>,
     file_lines: OnceCell<Arc<FileMap<'a>>>, //line -> instruction>
-    capstone:OnceCell<Rc<Capstone>>,
+    capstone: OnceCell<Rc<Capstone>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -104,54 +104,53 @@ pub fn map_dissasm(
     cs: &Capstone,
     data: &[u8],
     address: u64,
-    f:&mut impl FnMut(InstructionDetail)->Result<(),Box<dyn Error>>,
-
+    f: &mut impl FnMut(InstructionDetail) -> Result<(), Box<dyn Error>>,
 ) -> Result<(), Box<dyn Error>> {
     //we dissasm in chunks to be interactive and save memory
     let mut cur_address = address;
     let mut cur_data = data;
 
-    loop{
-        let disasm = cs.disasm_count(cur_data, cur_address,1000)?;
-            
+    loop {
+        let disasm = cs.disasm_count(cur_data, cur_address, 1000)?;
+
         let Some(last) = disasm.last() else {
             return Ok(());
         };
-        let end = last.address()+last.len() as u64;
-        cur_data = &cur_data[(end-cur_address)as usize..];
+        let end = last.address() + last.len() as u64;
+        cur_data = &cur_data[(end - cur_address) as usize..];
         cur_address = end;
-
 
         for (_serial_number, insn) in disasm.iter().enumerate() {
             f(insn.into())?;
-        } 
+        }
     }
-
-    
 }
 
 impl CodeSection<'_> {
-    pub fn get_high(&self)->u64{
-        self.address+self.data.len().saturating_sub(1) as u64
+    pub fn get_high(&self) -> u64 {
+        self.address + self.data.len().saturating_sub(1) as u64
     }
 
     pub fn get_existing_asm(&self) -> Arc<[InstructionDetail]> {
         self.asm.get().unwrap().clone()
     }
- 
 
-    pub fn map_asm(&self, cs: &Capstone,f:&mut impl FnMut(&InstructionDetail)->Result<(),Box<dyn Error>>,) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
-        if let Some(ans) = self.asm.get(){
+    pub fn map_asm(
+        &self,
+        cs: &Capstone,
+        f: &mut impl FnMut(&InstructionDetail) -> Result<(), Box<dyn Error>>,
+    ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+        if let Some(ans) = self.asm.get() {
             for ins in ans.iter() {
                 f(&ins)?;
             }
 
-            return Ok(ans.clone())
+            return Ok(ans.clone());
         }
         self.asm
             .get_or_try_init(|| {
                 let mut instructions = Vec::new();
-                map_dissasm(&cs, self.data, self.address,&mut |ins|{
+                map_dissasm(&cs, self.data, self.address, &mut |ins| {
                     f(&ins)?;
                     instructions.push(ins);
                     Ok(())
@@ -161,10 +160,7 @@ impl CodeSection<'_> {
             .cloned()
     }
 
-    pub fn get_asm(
-        &self,
-        cs: &Capstone,
-    ) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
+    pub fn get_asm(&self, cs: &Capstone) -> Result<Arc<[InstructionDetail]>, Box<dyn Error>> {
         self.asm
             .get_or_try_init(|| dissasm(&cs, self.data, self.address))
             .cloned()
@@ -181,45 +177,48 @@ pub struct InfoSection<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct InstructionDetail {
     // pub serial_number: usize,
-
     pub address: u64,
     pub mnemonic: Box<str>,
     pub op_str: Box<str>,
     pub size: usize,
 }
 
-impl From<&capstone::Insn<'_>> for InstructionDetail{
-fn from(insn: &capstone::Insn<'_>) -> Self { 
-    InstructionDetail {
-        // serial_number,
-        address: insn.address(),
-        mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
-        op_str: insn.op_str().unwrap_or("unknown").into(),
-        size: insn.len(),
-    }}
+impl From<&capstone::Insn<'_>> for InstructionDetail {
+    fn from(insn: &capstone::Insn<'_>) -> Self {
+        InstructionDetail {
+            // serial_number,
+            address: insn.address(),
+            mnemonic: insn.mnemonic().unwrap_or("unknown").into(),
+            op_str: insn.op_str().unwrap_or("unknown").into(),
+            size: insn.len(),
+        }
+    }
 }
 
 impl InstructionDetail {
-    pub fn get_end(&self)->u64{
-        self.address+self.size as u64
+    pub fn get_end(&self) -> u64 {
+        self.address + self.size as u64
     }
 }
 
 impl<'a> MachineFile<'a> {
-    pub fn dissasm_address(&self,target:u64)->Result<Option<InstructionDetail>,Box<dyn Error>>{
+    pub fn dissasm_address(
+        &self,
+        target: u64,
+    ) -> Result<Option<InstructionDetail>, Box<dyn Error>> {
         for s in &self.sections {
             let Section::Code(code) = s else {
                 continue;
             };
 
-            if target < code.address || target >= code.get_high(){
+            if target < code.address || target >= code.get_high() {
                 continue;
             }
 
             let offset = (target - code.address) as usize;
             let data = &code.data[offset..];
             let cs = self.get_capstone()?;
-            return Ok(cs.disasm_count(data,target,1)?.first().map(|x| x.into()));
+            return Ok(cs.disasm_count(data, target, 1)?.first().map(|x| x.into()));
         }
         Ok(None)
     }
@@ -233,70 +232,61 @@ impl<'a> MachineFile<'a> {
                 let handle = Arc::get_mut(&mut ans).unwrap();
 
                 for section in self.sections.iter() {
-                    let Section::Code(code_section) = section else{
+                    let Section::Code(code_section) = section else {
                         continue;
                     };
 
                     let end_address = code_section.get_high();
-                    let mut iter = context.find_location_range(code_section.address,end_address)?;
+                    let mut iter =
+                        context.find_location_range(code_section.address, end_address)?;
                     let mut prev_end = code_section.address;
 
-                    while let Some((low,size,loc)) = FallibleIterator::next(&mut iter)?{
-
+                    while let Some((low, size, loc)) = FallibleIterator::next(&mut iter)? {
                         // if low != prev_end{
-                        if low > prev_end{
-                            let size = (low-prev_end) as usize;
-                            let start_idx =(prev_end-code_section.address)as usize;
+                        if low > prev_end {
+                            let size = (low - prev_end) as usize;
+                            let start_idx = (prev_end - code_section.address) as usize;
                             let data = &code_section.data[start_idx..][..size];
-                            handle.extra.push(CodeRange{
-                                address:prev_end,
+                            handle.extra.push(CodeRange {
+                                address: prev_end,
                                 data,
                             })
                         }
 
-                        prev_end = low+size;
-                        let start_idx =(low-code_section.address) as usize;
-                        if start_idx.saturating_add(size.saturating_sub(1) as usize) >= code_section.data.len() {
+                        prev_end = low + size;
+                        let start_idx = (low - code_section.address) as usize;
+                        if start_idx.saturating_add(size.saturating_sub(1) as usize)
+                            >= code_section.data.len()
+                        {
                             return Err("dwarf info ordered a bad read (out of section)".into());
                         }
 
-
-
                         let data = &code_section.data[start_idx..][..size as usize];
 
-                        let cur_range = CodeRange{
-                            address:low,
-                            data
-                        };
+                        let cur_range = CodeRange { address: low, data };
 
                         match (loc.file, loc.line) {
-                                (Some(file_name), Some(line)) => {
-                                    let file = Path::new(file_name).into();
+                            (Some(file_name), Some(line)) => {
+                                let file = Path::new(file_name).into();
 
-                                    handle
-                                        .inner
-                                        .entry(file)
-                                        .or_default()
-                                        .inner
-                                        .entry(line)
-                                        .or_default()
-                                        .push(cur_range);
-                                }
-                                (Some(file_name), None) => {
-                                    let file = Path::new(file_name).into();
-
-                                    handle
-                                        .inner
-                                        .entry(file)
-                                        .or_default()
-                                        .extra
-                                        .push(cur_range);
-                                }
-                                (None, _) => handle.extra.push(cur_range),
+                                handle
+                                    .inner
+                                    .entry(file)
+                                    .or_default()
+                                    .inner
+                                    .entry(line)
+                                    .or_default()
+                                    .push(cur_range);
                             }
-                        }
+                            (Some(file_name), None) => {
+                                let file = Path::new(file_name).into();
 
+                                handle.inner.entry(file).or_default().extra.push(cur_range);
+                            }
+                            (None, _) => handle.extra.push(cur_range),
+                        }
                     }
+                }
                 Ok(ans)
             })
             .cloned()
@@ -369,10 +359,9 @@ impl<'a> MachineFile<'a> {
             sections: parsed_sections.into(),
             dwarf: OnceCell::new(),
             addr2line: OnceCell::new(),
-            file_lines:OnceCell::new(),
-            capstone:OnceCell::new(),
+            file_lines: OnceCell::new(),
+            capstone: OnceCell::new(),
         };
-
 
         Ok(ans)
     }

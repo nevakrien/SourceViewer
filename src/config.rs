@@ -7,8 +7,8 @@ fn get_project_dir() -> Option<ProjectDirs> {
     ProjectDirs::from("", "", "source-viewer")
 }
 
-pub fn get_walk_config_path()->Option<PathBuf>{
-	let proj = get_project_dir()?;
+pub fn get_walk_config_path() -> Option<PathBuf> {
+    let proj = get_project_dir()?;
     Some(proj.preference_dir().join("walk-config.toml"))
 }
 
@@ -18,19 +18,14 @@ pub struct WalkConfig {
 }
 
 impl WalkConfig {
-	pub fn get_layout(&self) -> Result<[Constraint; 2], Box<dyn Error>> {
-	    let p = self.asm_percent.unwrap_or(53);
-	    let left = 100u32
+    pub fn get_layout(&self) -> Result<[Constraint; 2], Box<dyn Error>> {
+        let p = self.asm_percent.unwrap_or(53);
+        let left = 100u32
             .checked_sub(p)
-            .ok_or_else(|| {
-                format!("asm_percent must be ≤ 100 (got {})", p)
-            })?;
+            .ok_or_else(|| format!("asm_percent must be ≤ 100 (got {})", p))?;
 
-        Ok([
-            Constraint::Ratio(left, 100),
-            Constraint::Ratio(p, 100),
-        ])
-	}
+        Ok([Constraint::Ratio(left, 100), Constraint::Ratio(p, 100)])
+    }
     pub fn get_global() -> Result<Self, Box<dyn Error>> {
         let Some(path) = get_walk_config_path() else {
             // No home dir / config dir available → act like no config

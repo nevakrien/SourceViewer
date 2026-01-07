@@ -1,21 +1,21 @@
-use crate::file_parser::EStr;
-use addr2line::FrameIter;
-use once_cell::unsync::OnceCell;
-use crate::file_parser::map_dissasm;
-use capstone::Capstone;
-use std::rc::Rc;
-use crate::file_parser::CodeRange;
-use std::fmt::Write;
 use crate::errors::StackedError;
 use crate::errors::WrapedError;
+use crate::file_parser::map_dissasm;
+use crate::file_parser::CodeRange;
+use crate::file_parser::EStr;
 use crate::file_parser::InstructionDetail;
 use crate::file_parser::MachineFile;
+use addr2line::FrameIter;
 use addr2line::LookupContinuation;
 use addr2line::LookupResult;
+use capstone::Capstone;
+use once_cell::unsync::OnceCell;
 use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use std::collections::hash_map;
@@ -93,14 +93,12 @@ impl<'a> FileRegistry<'a> {
 
 pub type DebugContext<'a> = addr2line::Context<EStr<'a>>;
 
-fn select_one_func<'a>(
-    mut frames: FrameIter<EStr<'a>>,
-) -> Option<String> {
+fn select_one_func<'a>(mut frames: FrameIter<EStr<'a>>) -> Option<String> {
     while let Ok(Some(frame)) = frames.next() {
         if let Some(raw) = frame.function {
             if let Ok(name) = raw.demangle() {
                 //inner most function is probably the most intresting
-                return Some(name.to_string())
+                return Some(name.to_string());
             }
         }
     }
@@ -108,11 +106,10 @@ fn select_one_func<'a>(
     None
 }
 
-fn map_frame_func<'a,E>(
+fn map_frame_func<'a, E>(
     mut frames: FrameIter<EStr<'a>>,
-    mut map:impl FnMut(&str)->Result<(),E>,
-) -> Result<(),E>{
-
+    mut map: impl FnMut(&str) -> Result<(), E>,
+) -> Result<(), E> {
     while let Ok(Some(frame)) = frames.next() {
         if let Some(raw) = frame.function {
             if let Ok(name) = raw.demangle() {
@@ -132,11 +129,11 @@ pub fn resolve_func_name(addr2line: &DebugContext, address: u64) -> Option<Strin
     select_one_func(frames)
 }
 
-fn get_func_frames<'a, 'b: 'a,'c>(
+fn get_func_frames<'a, 'b: 'a, 'c>(
     addr2line: &'c DebugContext<'a>,
     registry: &mut FileRegistry<'b>,
     address: u64,
-) -> Option<FrameIter<'c,EStr<'a>>>{
+) -> Option<FrameIter<'c, EStr<'a>>> {
     let mut lookup_result = addr2line.find_frames(address);
 
     loop {
@@ -148,11 +145,11 @@ fn get_func_frames<'a, 'b: 'a,'c>(
                 let dwo_path = load
                     .comp_dir
                     .as_ref()
-                    .map(|comp_dir : &EStr | {
+                    .map(|comp_dir: &EStr| {
                         std::path::PathBuf::from(comp_dir.to_string_lossy().to_string())
                     })
-                    .and_then(|comp_dir_path  | {
-                        load.path.as_ref().map(|path:&EStr| {
+                    .and_then(|comp_dir_path| {
+                        load.path.as_ref().map(|path: &EStr| {
                             comp_dir_path
                                 .join(std::path::Path::new(&path.to_string_lossy().to_string()))
                         })
@@ -161,7 +158,7 @@ fn get_func_frames<'a, 'b: 'a,'c>(
                 // println!("load case {:?}",dwo_path);
 
                 let dwo = dwo_path.and_then(
-                    |full_path:std::path::PathBuf| {
+                    |full_path: std::path::PathBuf| {
                         registry
                             .get_machine(full_path.into())
                             .ok()
@@ -191,19 +188,18 @@ pub fn find_func_name<'a, 'b: 'a>(
     registry: &mut FileRegistry<'b>,
     address: u64,
 ) -> Option<String> {
-    get_func_frames(addr2line,registry,address)
-    .map(select_one_func)?
+    get_func_frames(addr2line, registry, address).map(select_one_func)?
 }
 
 pub fn map_funcs<'a, 'b: 'a, E>(
     addr2line: &DebugContext<'a>,
     registry: &mut FileRegistry<'b>,
     address: u64,
-    map:impl FnMut(&str)->Result<(),E>,
-) -> Result<(),E> {
-    if let Some(frame) = get_func_frames(addr2line,registry,address){
-        map_frame_func(frame,map)
-    }else{
+    map: impl FnMut(&str) -> Result<(), E>,
+) -> Result<(), E> {
+    if let Some(frame) = get_func_frames(addr2line, registry, address) {
+        map_frame_func(frame, map)
+    } else {
         Ok(())
     }
 }
@@ -214,42 +210,38 @@ pub fn map_funcs<'a, 'b: 'a, E>(
 //     pub file: Arc<Path>
 // }
 
-pub struct LazeyAsm<'a>{
+pub struct LazeyAsm<'a> {
     ranges: Vec<CodeRange<'a>>,
-    cs:Rc<Capstone>,
-    asm:OnceCell<Box<[InstructionDetail]>>
+    cs: Rc<Capstone>,
+    asm: OnceCell<Box<[InstructionDetail]>>,
 }
 
-impl<'a> LazeyAsm<'a>{
-    pub fn new(cs:Rc<Capstone>)->Self{
-        Self{
-            ranges:Vec::new(),
-            asm:OnceCell::new(),
+impl<'a> LazeyAsm<'a> {
+    pub fn new(cs: Rc<Capstone>) -> Self {
+        Self {
+            ranges: Vec::new(),
+            asm: OnceCell::new(),
             cs,
         }
     }
 
-    pub fn make_asm(&self)->Result<&[InstructionDetail],Box<dyn Error>>{
-        self.asm.get_or_try_init(||{
-            let mut ans = Vec::new();
-            for r in &self.ranges{
-                map_dissasm(
-                    &self.cs,
-                    r.data,
-                    r.address,
-                    &mut |ins|{Ok(ans.push(ins))}
-                )?;
-            }
-            Ok(ans.into())
-        }).map(|b|&**b)
-        
+    pub fn make_asm(&self) -> Result<&[InstructionDetail], Box<dyn Error>> {
+        self.asm
+            .get_or_try_init(|| {
+                let mut ans = Vec::new();
+                for r in &self.ranges {
+                    map_dissasm(&self.cs, r.data, r.address, &mut |ins| Ok(ans.push(ins)))?;
+                }
+                Ok(ans.into())
+            })
+            .map(|b| &**b)
     }
 }
 
 // #[derive(PartialEq)]
 pub struct CodeFile<'a> {
     pub text: String,
-    line_map:OnceCell<HashMap<u32,(usize,usize)>>,//line->byte span
+    line_map: OnceCell<HashMap<u32, (usize, usize)>>, //line->byte span
     asm: BTreeMap<u32, HashMap<Arc<Path>, LazeyAsm<'a>>>, //line -> instruction
     pub errors: Vec<(StackedError, Option<Arc<Path>>)>,
 }
@@ -259,7 +251,7 @@ impl<'a> CodeFile<'a> {
         let text = fs::read_to_string(path)?;
         Ok(CodeFile {
             text,
-            line_map:OnceCell::new(),
+            line_map: OnceCell::new(),
             asm: BTreeMap::new(),
             errors: Vec::new(),
         })
@@ -278,29 +270,37 @@ impl<'a> CodeFile<'a> {
     // }
 
     #[inline]
-    pub fn get_asm(&self, line: &u32, obj_path: Arc<Path>) -> Option<Result<&[InstructionDetail],Box<dyn Error>>> {
+    pub fn get_asm(
+        &self,
+        line: &u32,
+        obj_path: Arc<Path>,
+    ) -> Option<Result<&[InstructionDetail], Box<dyn Error>>> {
         self.asm.get(line)?.get(&obj_path).map(|x| x.make_asm()) //.unwrap_or(&[])
     }
 
     #[inline]
-    pub fn get_line(&self,line:u32)->Option<&str>{
-        let (start,end) = self.get_line_map().get(&line)?;
+    pub fn get_line(&self, line: u32) -> Option<&str> {
+        let (start, end) = self.get_line_map().get(&line)?;
         let slice = &self.text.as_bytes()[*start..*end];
         Some(std::str::from_utf8(slice).unwrap())
     }
 
-    fn get_line_map(&self)->&HashMap<u32,(usize,usize)>{
-        self.line_map.get_or_init(||{
-            self.text.lines().enumerate().map(|(i,t)|{
-                let number = i as u32 + 1;
-                let text_start = t.as_ptr().addr()-self.text.as_ptr().addr();
-                let text_end = text_start+t.len();
-                (number,(text_start,text_end))
-            }).collect()
+    fn get_line_map(&self) -> &HashMap<u32, (usize, usize)> {
+        self.line_map.get_or_init(|| {
+            self.text
+                .lines()
+                .enumerate()
+                .map(|(i, t)| {
+                    let number = i as u32 + 1;
+                    let text_start = t.as_ptr().addr() - self.text.as_ptr().addr();
+                    let text_end = text_start + t.len();
+                    (number, (text_start, text_end))
+                })
+                .collect()
         })
     }
 
-    fn populate(&mut self, asm: &mut FileRegistry<'a>, path: Arc<Path>){
+    fn populate(&mut self, asm: &mut FileRegistry<'a>, path: Arc<Path>) {
         // Helper closure that runs a fallible block, catches any Err,
         // pushes to self.errors, and continues the outer loop.
         macro_rules! try_wrapped {
@@ -318,25 +318,28 @@ impl<'a> CodeFile<'a> {
 
         for (obj_path, res) in asm.map.iter_mut() {
             // both can use normal `?` style thanks to the macro
-            let machine_file = try_wrapped!(res.as_ref().map_err(|e| e.clone().into()), "while getting machine");
+            let machine_file = try_wrapped!(
+                res.as_ref().map_err(|e| e.clone().into()),
+                "while getting machine"
+            );
             let cs = try_wrapped!(machine_file.get_capstone(), "while making dissasmbler");
             let map = try_wrapped!(machine_file.get_lines_map(), "while making context");
 
             if let Some(line_map) = map.get(&path) {
                 for (line, v) in line_map.iter_maped() {
-                    self
-                        .asm
+                    self.asm
                         .entry(*line)
                         .or_insert_with(HashMap::new)
                         .entry(obj_path.clone())
-                        .or_insert_with(||LazeyAsm::new(cs.clone()))
-                        .ranges.extend_from_slice(v);
+                        .or_insert_with(|| LazeyAsm::new(cs.clone()))
+                        .ranges
+                        .extend_from_slice(v);
                 }
             }
         }
     }
 
-    pub fn get_error(&self)->Result<(),String>{
+    pub fn get_error(&self) -> Result<(), String> {
         if !self.errors.is_empty() {
             let mut output = String::new();
 
@@ -344,7 +347,8 @@ impl<'a> CodeFile<'a> {
                 &mut output,
                 "⚠️  Warning: errors occurred while reading debug info ({} total):",
                 self.errors.len()
-            ).ok();
+            )
+            .ok();
 
             for (err, path_opt) in &self.errors {
                 let path_str = path_opt
@@ -355,11 +359,10 @@ impl<'a> CodeFile<'a> {
                 writeln!(&mut output, "• Path: {path_str}\n  Error: {err}\n").ok();
             }
 
-            return Err(output)
+            return Err(output);
         }
         Ok(())
     }
-
 }
 
 pub struct CodeRegistry<'data, 'r> {
@@ -395,7 +398,11 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
             .copied()
     }
 
-    pub fn get_source_file(&mut self, path: Arc<Path>,dwarf_errors:bool) -> Result<&'r CodeFile<'data>, Box<dyn Error>> {
+    pub fn get_source_file(
+        &mut self,
+        path: Arc<Path>,
+        dwarf_errors: bool,
+    ) -> Result<&'r CodeFile<'data>, Box<dyn Error>> {
         match self.source_files.entry(path.clone()) {
             hash_map::Entry::Occupied(entry) => entry.get().clone().map_err(|e| e.clone().into()),
             hash_map::Entry::Vacant(entry) => {
@@ -413,11 +420,9 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
                 };
 
                 code_file.populate(self.asm, path);
-                if dwarf_errors{
+                if dwarf_errors {
                     code_file.get_error()?
                 }
-                
-
 
                 entry.insert(Ok(code_file));
                 Ok(code_file)
@@ -432,7 +437,7 @@ impl<'data, 'r> CodeRegistry<'data, 'r> {
         self.asm.get_machine(path)
     }
 
-    pub fn get_existing_machine(&self,path:&Path)->Option<&MachineFile<'data>>{
+    pub fn get_existing_machine(&self, path: &Path) -> Option<&MachineFile<'data>> {
         self.asm.map.get(path).map(|x| x.as_ref().ok())?
     }
 }

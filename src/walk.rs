@@ -1,6 +1,4 @@
 use crate::config::WalkConfig;
-use std::borrow::Cow;
-use std::error::Error;
 use crate::file_parser::InstructionDetail;
 use crate::program_context::CodeFile;
 use crate::program_context::CodeRegistry;
@@ -10,14 +8,16 @@ use crossterm::event::{
     MouseEventKind,
 };
 use crossterm::execute;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::error::Error;
+use std::fs;
 use std::io::{self};
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
-use std::fs;
 use tui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -47,10 +47,10 @@ pub struct GlobalState<'arena> {
     // original_dir: Arc<Path>,
     pub dir_list_state: ListState,
     dir_entries: Box<[std::fs::DirEntry]>,
-    layout:[Constraint; 2],
+    layout: [Constraint; 2],
     show_lines: bool,
 
-    selected_asm: BTreeMap<u64, (Cow<'arena,InstructionDetail> , Rc<str>)>, //address -> (instructions,line text)
+    selected_asm: BTreeMap<u64, (Cow<'arena, InstructionDetail>, Rc<str>)>, //address -> (instructions,line text)
     // asm_cursor: usize,
     cur_asm: u64,
 
@@ -73,7 +73,7 @@ impl<'arena> GlobalState<'arena> {
             // mode: Mode::Dir,
             // file_content: Vec::new(),
             dir_entries,
-            layout:config.get_layout()?,
+            layout: config.get_layout()?,
 
             // file_scroll: 0,
             // cursor: 0,
@@ -97,8 +97,10 @@ impl<'arena> GlobalState<'arena> {
             None => {}
             Some(data) => {
                 // let current_addres = self
-                self.selected_asm
-                    .extend(data.iter().map(|x| (x.address, (Cow::Borrowed(x), text.clone()))));
+                self.selected_asm.extend(
+                    data.iter()
+                        .map(|x| (x.address, (Cow::Borrowed(x), text.clone()))),
+                );
             }
         }
     }
@@ -142,18 +144,14 @@ impl<'arena> GlobalState<'arena> {
     //         self.cur_asm = prev_address;
     //     }
     // }
-     #[inline]
+    #[inline]
     fn asm_up(&mut self) {
         // Move to the previous address if possible
-        if let Some((_,(prev_ins,_))) = self
-            .selected_asm
-            .range(..self.cur_asm)
-            .next_back()
-        {   
-            if prev_ins.get_end()==self.cur_asm{
-                self.cur_asm=prev_ins.address;
-            }else{
-                self.cur_asm=prev_ins.get_end();
+        if let Some((_, (prev_ins, _))) = self.selected_asm.range(..self.cur_asm).next_back() {
+            if prev_ins.get_end() == self.cur_asm {
+                self.cur_asm = prev_ins.address;
+            } else {
+                self.cur_asm = prev_ins.get_end();
             }
         }
     }
@@ -171,58 +169,60 @@ impl<'arena> GlobalState<'arena> {
     //     }
     // }
 
-     #[inline]
+    #[inline]
     fn asm_down(&mut self) {
-        if let Some((addr,(ins,_))) = self
-            .selected_asm
-            .range((self.cur_asm)..)
-            .next()
-        {
-            if *addr == self.cur_asm{
+        if let Some((addr, (ins, _))) = self.selected_asm.range((self.cur_asm)..).next() {
+            if *addr == self.cur_asm {
                 self.cur_asm = ins.get_end();
-            }else{
-                self.cur_asm=*addr;
+            } else {
+                self.cur_asm = *addr;
             }
-        }   
+        }
     }
 
     #[inline]
-    fn asm_toggle(&mut self,obj_path:&Path,code_files: &mut CodeRegistry<'_, 'arena>,) -> Result<(),Box<dyn Error>>{
+    fn asm_toggle(
+        &mut self,
+        obj_path: &Path,
+        code_files: &mut CodeRegistry<'_, 'arena>,
+    ) -> Result<(), Box<dyn Error>> {
         use std::collections::btree_map::Entry;
         match self.selected_asm.entry(self.cur_asm) {
             Entry::Vacant(v) => {
                 let machine_file = code_files.get_existing_machine(obj_path).unwrap();
                 let ctx = machine_file.get_addr2line()?;
 
-                let Some(raw_asm) = machine_file.dissasm_address(self.cur_asm)? else {return Ok(())};
-                
-                if let Some(addr2line::Location{
-                    file:Some(file),
-                    line:Some(line),
+                let Some(raw_asm) = machine_file.dissasm_address(self.cur_asm)? else {
+                    return Ok(());
+                };
+
+                if let Some(addr2line::Location {
+                    file: Some(file),
+                    line: Some(line),
                     ..
                 }) = ctx.find_location(raw_asm.address)?
-
                 {
                     let path = Path::new(file).into();
-                    let code_file = code_files.get_source_file(path,false)?;
+                    let code_file = code_files.get_source_file(path, false)?;
                     let text = code_file.get_line(line);
                     match text {
-
-                        Some(t)=>v.insert((Cow::Owned(raw_asm),sanitise(t.trim_start().to_string()).into())),
-                        None=>v.insert((Cow::Owned(raw_asm),"<?>".into())),
+                        Some(t) => v.insert((
+                            Cow::Owned(raw_asm),
+                            sanitise(t.trim_start().to_string()).into(),
+                        )),
+                        None => v.insert((Cow::Owned(raw_asm), "<?>".into())),
                     };
-
-                }else{
-                    v.insert((Cow::Owned(raw_asm),"<?>".into()));
+                } else {
+                    v.insert((Cow::Owned(raw_asm), "<?>".into()));
                 }
 
                 // Line::new(sanitise())
                 self.asm_down();
-            },
+            }
             Entry::Occupied(o) => {
                 o.remove();
                 self.asm_up();
-            },
+            }
         };
 
         Ok(())
@@ -289,6 +289,90 @@ impl<'me, 'arena> FileState<'me, 'arena> {
         self.cursor = target;
         self.file_scroll = target;
     }
+
+    #[inline]
+    fn jump_to_address(
+        &mut self,
+        target_addr: u64,
+        obj_path: &Path,
+        code_files: &mut CodeRegistry<'_, 'arena>,
+    ) -> Result<(), Box<dyn Error>> {
+        // First check if address is already in selected_asm (including if it's in the middle of an instruction)
+        for (addr, (ins, _)) in self.global.selected_asm.range(..=target_addr).rev() {
+            if ins.address <= target_addr && target_addr < ins.get_end() {
+                // Address is within this instruction
+                self.global.cur_asm = *addr;
+                return Ok(());
+            }
+        }
+
+        // Try to find debug info for the target address
+        let machine_file = code_files
+            .get_existing_machine(obj_path)
+            .ok_or("Failed to get machine file")?;
+        let ctx = machine_file.get_addr2line()?;
+
+        // Try direct lookup first
+        if let Some(raw_asm) = machine_file.dissasm_address(target_addr)? {
+            if let Some(addr2line::Location {
+                file: Some(file),
+                line: Some(line),
+                ..
+            }) = ctx.find_location(raw_asm.address)?
+            {
+                let path = Path::new(file).into();
+                let code_file = code_files.get_source_file(path, false)?;
+                let text = code_file.get_line(line);
+                let text = match text {
+                    Some(t) => sanitise(t.trim_start().to_string()).into(),
+                    None => "<??>".into(),
+                };
+                self.global
+                    .selected_asm
+                    .insert(target_addr, (Cow::Owned(raw_asm), text));
+                self.global.cur_asm = target_addr;
+                return Ok(());
+            }
+        }
+
+        // If direct lookup failed, iterate backwards to find a valid debug location
+        const MAX_BACKTRACK: u64 = 10000; // Reasonable limit for backwards search
+        for offset in 1..=MAX_BACKTRACK {
+            let check_addr = target_addr.saturating_sub(offset);
+
+            if let Some(raw_asm) = machine_file.dissasm_address(check_addr)? {
+                if let Some(addr2line::Location {
+                    file: Some(file),
+                    line: Some(line),
+                    ..
+                }) = ctx.find_location(raw_asm.address)?
+                {
+                    let path = Path::new(file).into();
+                    let code_file = code_files.get_source_file(path, false)?;
+                    let text = code_file.get_line(line);
+                    let text = match text {
+                        Some(t) => sanitise(t.trim_start().to_string()).into(),
+                        None => "<??>".into(),
+                    };
+                    self.global
+                        .selected_asm
+                        .insert(check_addr, (Cow::Owned(raw_asm), text));
+                    self.global.cur_asm = check_addr;
+                    return Ok(());
+                }
+            }
+        }
+
+        // If we couldn't find anything, fall back to the closest existing address
+        if let Some((closest_addr, _)) = self.global.selected_asm.range(..=target_addr).next_back()
+        {
+            self.global.cur_asm = *closest_addr;
+        } else if let Some((first_addr, _)) = self.global.selected_asm.iter().next() {
+            self.global.cur_asm = *first_addr;
+        }
+
+        Ok(())
+    }
 }
 
 struct Line<'data> {
@@ -313,22 +397,21 @@ impl<'data> Line<'data> {
         &mut self,
         code_file: &'data CodeFile,
         obj_path: Arc<Path>,
-    ) -> Result<Option<&'data [InstructionDetail]>,Box<dyn Error>> {
+    ) -> Result<Option<&'data [InstructionDetail]>, Box<dyn Error>> {
         // eprintln!("LOAD_DEBUG for line {} file {}", self.line_number, obj_path.display());
 
         match self.debug_info {
             Some(x) => Ok(x),
             None => {
-                let ans = match code_file.get_asm(&(self.line_number as u32), obj_path){
-                    Some(res)=>{
+                let ans = match code_file.get_asm(&(self.line_number as u32), obj_path) {
+                    Some(res) => {
                         // eprintln!("LOAD_DEBUG found something");
                         Some(res?)
                     }
-                    ,
-                    None=>{
+                    None => {
                         // eprintln!("LOAD_DEBUG found nothing!!!");
                         None
-                    },
+                    }
                 };
 
                 self.debug_info = Some(ans);
@@ -409,7 +492,7 @@ pub enum DirResult<'me, 'arena> {
 
 pub fn handle_directory_input<'me, 'arena>(
     state: &'me mut GlobalState<'arena>,
-    code_files:&mut CodeRegistry<'_,'arena>,
+    code_files: &mut CodeRegistry<'_, 'arena>,
     obj_path: Arc<Path>,
 ) -> Result<DirResult<'me, 'arena>, Box<dyn Error>> {
     match event::read()? {
@@ -450,28 +533,29 @@ pub fn handle_directory_input<'me, 'arena>(
                 KeyCode::Char('w') => state.asm_up(),
 
                 KeyCode::Char('s') => state.asm_down(),
-                KeyCode::Char(' ') => state.asm_toggle(&obj_path,code_files)?,
+                KeyCode::Char(' ') => state.asm_toggle(&obj_path, code_files)?,
 
                 KeyCode::Enter => {
                     if let Some(i) = state.dir_list_state.selected() {
-                        let path:Arc<Path> = state.dir_entries[i].path().into();
+                        let path: Arc<Path> = state.dir_entries[i].path().into();
                         if path.is_dir() {
                             state.current_dir = path;
                             load_dir(state)?;
                             state.dir_list_state.select(Some(0));
                         } else if path.is_file() {
-                            let code_file = code_files.get_source_file(path.clone(),false)?;
-                            return Ok(DirResult::File(load_file(state,&path, code_file)?));
+                            let code_file = code_files.get_source_file(path.clone(), false)?;
+                            return Ok(DirResult::File(load_file(state, &path, code_file)?));
                         }
                     }
                 }
                 KeyCode::Esc => {
                     // if state.current_dir != state.original_dir {
-                        {
+                    {
                         if let Some(parent) = state.current_dir.parent() {
-                            let parent:Arc<Path> = parent.into();
+                            let parent: Arc<Path> = parent.into();
                             state.current_dir = parent.clone();
-                            state.dir_entries = fs::read_dir(parent)?.filter_map(Result::ok).collect();
+                            state.dir_entries =
+                                fs::read_dir(parent)?.filter_map(Result::ok).collect();
                             state.dir_list_state.select(Some(0));
                         }
                     }
@@ -514,7 +598,7 @@ pub fn handle_directory_input<'me, 'arena>(
 pub fn load_file<'b, 'arena>(
     global: &'b mut GlobalState<'arena>,
     path: &Path,
-    code_file:&CodeFile
+    code_file: &CodeFile,
 ) -> Result<FileState<'b, 'arena>, Box<dyn std::error::Error>> {
     Ok(FileState {
         file_content: read_file_lines(code_file),
@@ -538,10 +622,10 @@ pub enum FileResult {
 //code_file: &'arena CodeFile,obj_path: Arc<Path>
 pub fn handle_file_input<'arena>(
     state: &mut FileState<'_, 'arena>,
-    code_files:&mut CodeRegistry<'_,'arena>,
+    code_files: &mut CodeRegistry<'_, 'arena>,
     code_file: &'arena CodeFile,
     obj_path: Arc<Path>,
-) -> Result<FileResult,Box<dyn Error>> {
+) -> Result<FileResult, Box<dyn Error>> {
     match event::read()? {
         Event::Key(KeyEvent { code, kind, .. }) => {
             if crossterm::event::KeyEventKind::Release == kind {
@@ -554,7 +638,15 @@ pub fn handle_file_input<'arena>(
                     KeyCode::Esc => state.reset_command_bar(),
                     KeyCode::Enter => {
                         let command = state.command_input.trim();
-                        if let Ok(line) = command.parse::<usize>() {
+                        // Try parsing as hex address first
+                        if let Some(hex_str) = command.strip_prefix("0x") {
+                            if let Ok(addr) = u64::from_str_radix(&hex_str.to_lowercase(), 16) {
+                                if let Err(_e) = state.jump_to_address(addr, &obj_path, code_files)
+                                {
+                                    // Silently handle errors - user will see if jump worked or not
+                                }
+                            }
+                        } else if let Ok(line) = command.parse::<usize>() {
                             state.jump_to_line(line.max(1));
                         }
                         state.reset_command_bar();
@@ -601,7 +693,7 @@ pub fn handle_file_input<'arena>(
                 }
                 KeyCode::Char('w') => state.global.asm_up(),
                 KeyCode::Char('s') => state.global.asm_down(),
-                KeyCode::Char(' ') => state.global.asm_toggle(&obj_path,code_files)?,
+                KeyCode::Char(' ') => state.global.asm_toggle(&obj_path, code_files)?,
 
                 KeyCode::Up => {
                     if state.cursor > 0 {
@@ -682,11 +774,11 @@ pub fn handle_file_input<'arena>(
 fn sanitise(mut s: String) -> String {
     s = s.replace('\t', "  ");
     s.retain(|c| !c.is_control());
-    
+
     s
 }
 
-fn read_file_lines(code_file:&CodeFile) -> Vec<Line<'static>> {
+fn read_file_lines(code_file: &CodeFile) -> Vec<Line<'static>> {
     // let file = File::open(path)?;
     // let reader = io::BufReader::new(file);
 
@@ -719,18 +811,17 @@ fn create_line<'a>(line: &Line, show_lines: bool) -> ListItem<'a> {
             format!("{:<4}", line.line_number),
             if line.is_selected {
                 Style::default().fg(Color::Red)
-            }
-            else{
+            } else {
                 Style::default().fg(Color::Blue)
-            }
+            },
         )
     } else {
         Span::raw("")
     };
 
-    let line_text = match (&*line.content,line.is_selected) {
-        ("",true) => "-".to_string(),
-        (a,_) => a.to_string(),
+    let line_text = match (&*line.content, line.is_selected) {
+        ("", true) => "-".to_string(),
+        (a, _) => a.to_string(),
     };
 
     let line_content_span = Span::styled(line_text, line_style);
@@ -809,14 +900,12 @@ pub fn render_file_asm_viewer(
         f.render_widget(make_assembly_inner(state.global, asm_lines), layout[1]);
 
         if let Some(command_area) = command_area {
-            let command_block = Block::default()
-                .borders(Borders::ALL)
-                .title(Span::styled(
-                    "Command",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ));
+            let command_block = Block::default().borders(Borders::ALL).title(Span::styled(
+                "Command",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
 
             let command_text = format!("> {}", state.command_input);
             let command = Paragraph::new(command_text).block(command_block);
@@ -831,17 +920,15 @@ pub fn render_file_asm_viewer(
     Ok(())
 }
 
-fn maybe_highlight(h:bool,style:Style)->Style{
-   if h {
-        style.bg(Color::DarkGray)
-        .add_modifier(Modifier::BOLD)
-    }else{
+fn maybe_highlight(h: bool, style: Style) -> Style {
+    if h {
+        style.bg(Color::DarkGray).add_modifier(Modifier::BOLD)
+    } else {
         style
     }
 }
 
-fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> List<'a>
-{
+fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> List<'a> {
     let asm_block = Block::default().borders(Borders::ALL).title(Span::styled(
         "Assembly View",
         Style::default()
@@ -849,49 +936,42 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             .add_modifier(Modifier::BOLD),
     ));
 
-
     let mut asm_items = Vec::with_capacity(state.selected_asm.len());
     // asm_items.push(ListItem::new(vec![Spans::from(
     //     format!("currently holding {} items",state.selected_asm.len())
     // )]));
 
-    let start_key = state.selected_asm
-    .range(..state.cur_asm)
-    .rev()
-    .take((1+max_visible_lines*2)/3)
-    .fold(state.cur_asm,|_,(a,_)| *a);
+    let start_key = state
+        .selected_asm
+        .range(..state.cur_asm)
+        .rev()
+        .take((1 + max_visible_lines * 2) / 3)
+        .fold(state.cur_asm, |_, (a, _)| *a);
 
-    let mut iter = state.selected_asm
-        .range(start_key..)
-        .peekable();
-        
-    let make_dots = |h:bool|{
-        ListItem::new(vec![Spans::from("...")]).style(
-            maybe_highlight(
-                h,
-                Style::default().fg(Color::Red)
-            )
-        )
+    let mut iter = state.selected_asm.range(start_key..).peekable();
+
+    let make_dots = |h: bool| {
+        ListItem::new(vec![Spans::from("...")])
+            .style(maybe_highlight(h, Style::default().fg(Color::Red)))
     };
 
     match iter.peek() {
-        Some((0,_)) =>{},
-        Some(_)=>{
+        Some((0, _)) => {}
+        Some(_) => {
             asm_items.push(make_dots(false));
         }
-        None=>{
+        None => {
             asm_items.push(make_dots(true));
         }
     }
 
-    while let Some((_,(ins,text))) = iter.next() {
+    while let Some((_, (ins, text))) = iter.next() {
         if asm_items.len() >= max_visible_lines {
             break;
         }
 
         let formatted_instruction = format!(
             "{:#010x}: {:<6} {:<30} {:<30}",
-
             ins.address,
             ins.mnemonic,
             ins.op_str,
@@ -899,24 +979,21 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
         );
 
         asm_items.push(
-            ListItem::new(vec![Spans::from(formatted_instruction)])
-                .style(
-                    maybe_highlight(
-                        ins.address==state.cur_asm,
-                        Style::default().fg(Color::Cyan)
-                    )
-                ),
+            ListItem::new(vec![Spans::from(formatted_instruction)]).style(maybe_highlight(
+                ins.address == state.cur_asm,
+                Style::default().fg(Color::Cyan),
+            )),
         );
 
         if asm_items.len() >= max_visible_lines {
             break;
         }
 
-        let Some((next_address,_)) = iter.peek() else {
-            let selected = ins.get_end()<=state.cur_asm;
+        let Some((next_address, _)) = iter.peek() else {
+            let selected = ins.get_end() <= state.cur_asm;
             asm_items.push(make_dots(selected));
             break;
-        }; 
+        };
 
         let missing_range = ins.get_end()..**next_address;
         if !missing_range.is_empty() {
@@ -924,8 +1001,6 @@ fn make_assembly_inner<'a>(state: &GlobalState, max_visible_lines: usize) -> Lis
             asm_items.push(make_dots(selected));
         }
     }
-
-    
 
     List::new(asm_items).block(asm_block)
     // .highlight_style(Style::default()
@@ -990,14 +1065,13 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
             let terminal = &mut self.terminal;
             let state = &mut self.state;
 
-            match handle_directory_input(state,code_files,obj_file.clone())? {
+            match handle_directory_input(state, code_files, obj_file.clone())? {
                 DirResult::KeepGoing => {}
                 DirResult::Exit => return Ok(()),
                 DirResult::File(mut file_state) => {
-                    let path: Arc<Path> =
-                        Path::new(&file_state.file_path).into();
-                        // fs::canonicalize(Path::new(&file_state.file_path))?.into();
-                    let code_file = code_files.get_source_file(path,true)?;
+                    let path: Arc<Path> = Path::new(&file_state.file_path).into();
+                    // fs::canonicalize(Path::new(&file_state.file_path))?.into();
+                    let code_file = code_files.get_source_file(path, true)?;
                     let res = Self::walk_file_loop(
                         &mut self.last_frame,
                         terminal,
@@ -1029,7 +1103,7 @@ impl<'me, 'arena> TerminalSession<'me, 'arena> {
             wait_frame_start(last_frame)?;
 
             render_file_asm_viewer(terminal, file_state)?;
-            let res = handle_file_input(file_state,code_files, code_file, obj_file.clone())?;
+            let res = handle_file_input(file_state, code_files, code_file, obj_file.clone())?;
             match res {
                 FileResult::KeepGoing => {}
                 _ => return Ok(res),
